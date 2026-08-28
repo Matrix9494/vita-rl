@@ -10,3 +10,7 @@ venv/
 
 # Generated rollout artifacts and experiment logs are kept out of source control.
 runs/
+
+# Hillclimb hook files
+/.codex/hooks.json
+/.codex/hooks.json.malformed-*
