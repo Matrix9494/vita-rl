@@ -1,0 +1,512 @@
+[
+  {
+    "author": "androider",
+    "categories": [
+      "S-Rank",
+      "Global League",
+      "Base Light",
+      "Live Play",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      26,
+      30,
+      40,
+      41
+    ],
+    "comments": 6,
+    "favorites": 28,
+    "first_published": "03/01/2023",
+    "height": 19,
+    "last_published": null,
+    "map_id": 140000,
+    "name": "140000 Ways to Die",
+    "player_count": 2,
+    "rating": 5.2,
+    "rating_votes": 20,
+    "width": 21
+  },
+  {
+    "author": "Voice of Akasha",
+    "categories": [
+      "S-Rank",
+      "Global League",
+      "Hall of Fame",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      26,
+      32,
+      41
+    ],
+    "comments": 44,
+    "favorites": 641,
+    "first_published": "08/03/2019",
+    "height": 19,
+    "last_published": null,
+    "map_id": 77060,
+    "name": "A Hope Forlorn",
+    "player_count": 2,
+    "rating": 7.14,
+    "rating_votes": 228,
+    "width": 23
+  },
+  {
+    "author": "Bamboozle",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      41
+    ],
+    "comments": 22,
+    "favorites": 188,
+    "first_published": "06/28/2013",
+    "height": 20,
+    "last_published": null,
+    "map_id": 61748,
+    "name": "Amber Valley",
+    "player_count": 2,
+    "rating": 6.96,
+    "rating_votes": 51,
+    "width": 20
+  },
+  {
+    "author": "Everdan",
+    "categories": [
+      "S-Rank",
+      "Global League",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      26,
+      41
+    ],
+    "comments": 11,
+    "favorites": 59,
+    "first_published": "08/11/2016",
+    "height": 16,
+    "last_published": null,
+    "map_id": 69201,
+    "name": "Beads on a String",
+    "player_count": 2,
+    "rating": 5.41,
+    "rating_votes": 22,
+    "width": 21
+  },
+  {
+    "author": "Walker Boh",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Live Play",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      40,
+      41
+    ],
+    "comments": 60,
+    "favorites": 259,
+    "first_published": "12/05/2011",
+    "height": 22,
+    "last_published": "02/01/2023",
+    "map_id": 56354,
+    "name": "Brush With Death",
+    "player_count": 2,
+    "rating": 5.91,
+    "rating_votes": 174,
+    "width": 25
+  },
+  {
+    "author": "Hellraider",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Live Play",
+      "Mixed Base",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      40,
+      31,
+      41
+    ],
+    "comments": 57,
+    "favorites": 679,
+    "first_published": "05/11/2008",
+    "height": 18,
+    "last_published": null,
+    "map_id": 36927,
+    "name": "Caustic Finale",
+    "player_count": 2,
+    "rating": 8.23,
+    "rating_votes": 315,
+    "width": 18
+  },
+  {
+    "author": "PikachuDX",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      41
+    ],
+    "comments": 23,
+    "favorites": 130,
+    "first_published": "09/15/2019",
+    "height": 16,
+    "last_published": null,
+    "map_id": 80184,
+    "name": "Celeste",
+    "player_count": 2,
+    "rating": 5.71,
+    "rating_votes": 129,
+    "width": 22
+  },
+  {
+    "author": "mori19",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Live Play",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      40,
+      41
+    ],
+    "comments": 7,
+    "favorites": 146,
+    "first_published": "04/14/2015",
+    "height": 24,
+    "last_published": null,
+    "map_id": 66571,
+    "name": "Cycles To Gehenna",
+    "player_count": 2,
+    "rating": 5.63,
+    "rating_votes": 40,
+    "width": 22
+  },
+  {
+    "author": "i-rob",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Live Play",
+      "Mixed Base",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      40,
+      31,
+      41
+    ],
+    "comments": 16,
+    "favorites": 182,
+    "first_published": "11/30/2010",
+    "height": 21,
+    "last_published": null,
+    "map_id": 51208,
+    "name": "Darkling treshold",
+    "player_count": 2,
+    "rating": 7.72,
+    "rating_votes": 39,
+    "width": 21
+  },
+  {
+    "author": "Voice of Akasha",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Mixed Base",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      31,
+      41
+    ],
+    "comments": 33,
+    "favorites": 134,
+    "first_published": "06/23/2020",
+    "height": 20,
+    "last_published": null,
+    "map_id": 82950,
+    "name": "End of Entropy",
+    "player_count": 2,
+    "rating": 5.7,
+    "rating_votes": 146,
+    "width": 23
+  },
+  {
+    "author": "mori8",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      41
+    ],
+    "comments": 12,
+    "favorites": 179,
+    "first_published": "07/28/2012",
+    "height": 18,
+    "last_published": "04/29/2015",
+    "map_id": 58876,
+    "name": "Force of Nature",
+    "player_count": 2,
+    "rating": 5.78,
+    "rating_votes": 55,
+    "width": 19
+  },
+  {
+    "author": "mori11",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Base Light",
+      "Live Play",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      30,
+      40,
+      41
+    ],
+    "comments": 18,
+    "favorites": 160,
+    "first_published": "11/15/2012",
+    "height": 16,
+    "last_published": null,
+    "map_id": 59589,
+    "name": "From Wharf to Wilds",
+    "player_count": 2,
+    "rating": 4.92,
+    "rating_votes": 123,
+    "width": 23
+  },
+  {
+    "author": "mori7wastaken",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      41
+    ],
+    "comments": 9,
+    "favorites": 103,
+    "first_published": "06/23/2012",
+    "height": 19,
+    "last_published": null,
+    "map_id": 58436,
+    "name": "It That Betrays",
+    "player_count": 2,
+    "rating": 5.95,
+    "rating_votes": 40,
+    "width": 20
+  },
+  {
+    "author": "MontySigurdson",
+    "categories": [
+      "S-Rank",
+      "Mixed Base",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      31,
+      41
+    ],
+    "comments": 13,
+    "favorites": 27,
+    "first_published": "08/10/2024",
+    "height": 20,
+    "last_published": "08/20/2024",
+    "map_id": 163134,
+    "name": "Looming Threat",
+    "player_count": 2,
+    "rating": 6.02,
+    "rating_votes": 48,
+    "width": 20
+  },
+  {
+    "author": "Bamboozle",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Live Play",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      40,
+      41
+    ],
+    "comments": 24,
+    "favorites": 206,
+    "first_published": "09/07/2013",
+    "height": 21,
+    "last_published": null,
+    "map_id": 62344,
+    "name": "Lucifer",
+    "player_count": 2,
+    "rating": 6.14,
+    "rating_votes": 131,
+    "width": 21
+  },
+  {
+    "author": "mori5",
+    "categories": [
+      "S-Rank",
+      "Live Play",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      40,
+      41
+    ],
+    "comments": 20,
+    "favorites": 55,
+    "first_published": "05/26/2012",
+    "height": 20,
+    "last_published": null,
+    "map_id": 58109,
+    "name": "Lunatic",
+    "player_count": 2,
+    "rating": 6.24,
+    "rating_votes": 46,
+    "width": 21
+  },
+  {
+    "author": "BamboozleIV",
+    "categories": [
+      "S-Rank",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      41
+    ],
+    "comments": 5,
+    "favorites": 23,
+    "first_published": "03/12/2015",
+    "height": 21,
+    "last_published": null,
+    "map_id": 66303,
+    "name": "Metaphorical Music",
+    "player_count": 2,
+    "rating": 5.25,
+    "rating_votes": 4,
+    "width": 23
+  },
+  {
+    "author": "Clownpiece",
+    "categories": [
+      "S-Rank",
+      "Global League",
+      "Live Play",
+      "Mixed Base",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      26,
+      40,
+      31,
+      41
+    ],
+    "comments": 6,
+    "favorites": 15,
+    "first_published": "08/09/2025",
+    "height": 17,
+    "last_published": null,
+    "map_id": 123858,
+    "name": "Misery",
+    "player_count": 2,
+    "rating": 5.63,
+    "rating_votes": 19,
+    "width": 21
+  },
+  {
+    "author": "Airbo",
+    "categories": [
+      "S-Rank",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      41
+    ],
+    "comments": 12,
+    "favorites": 34,
+    "first_published": "08/01/2012",
+    "height": 22,
+    "last_published": null,
+    "map_id": 58897,
+    "name": "Obsession",
+    "player_count": 2,
+    "rating": 4.57,
+    "rating_votes": 7,
+    "width": 21
+  },
+  {
+    "author": "Ilese 2",
+    "categories": [
+      "S-Rank",
+      "Hall of Fame",
+      "Base Light",
+      "Live Play",
+      "Standard"
+    ],
+    "category_ids": [
+      25,
+      32,
+      30,
+      40,
+      41
+    ],
+    "comments": 27,
+    "favorites": 59,
+    "first_published": "07/02/2021",
+    "height": 17,
+    "last_published": null,
+    "map_id": 90948,
+    "name": "Rivendell",
+    "player_count": 2,
+    "rating": 4.04,
+    "rating_votes": 82,
+    "width": 23
+  }
+]

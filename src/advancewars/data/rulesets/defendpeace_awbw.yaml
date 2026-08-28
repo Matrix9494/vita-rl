@@ -1,0 +1,11 @@
+name: defendpeace_awbw
+reference: https://github.com/ThislsAUsername/DefendPeace
+source_files:
+  - src/Engine/GameScenario.java
+  - src/Units/AWBWUnits.java
+  - src/Units/AWBWWeapons.java
+income_per_city: 1000
+starting_funds: 0
+unit_cap: 50
+capture_threshold: 20
+unit_scheme: AWBWUnits

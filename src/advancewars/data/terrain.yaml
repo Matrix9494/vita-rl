@@ -1,0 +1,99 @@
+terrain:
+  sea:
+    code: SE
+    defense: 0
+  shoal:
+    code: SH
+    defense: 0
+  grass:
+    code: GR
+    defense: 1
+  forest:
+    code: FR
+    defense: 2
+  reef:
+    code: RF
+    defense: 1
+  road:
+    code: RD
+    defense: 0
+  bridge:
+    code: BR
+    defense: 0
+  river:
+    code: RV
+    defense: 0
+  mountain:
+    code: MT
+    defense: 4
+  dunes:
+    code: DN
+    defense: 1
+  city:
+    code: CT
+    defense: 3
+    capturable: true
+    profitable: true
+    heals_land: true
+  hq:
+    code: HQ
+    defense: 4
+    capturable: true
+    profitable: true
+    heals_land: true
+  factory:
+    code: FC
+    defense: 3
+    capturable: true
+    profitable: true
+    heals_land: true
+  airport:
+    code: AP
+    defense: 3
+    capturable: true
+    profitable: true
+    heals_air: true
+  temp_airport:
+    code: TA
+    defense: 1
+    capturable: true
+    heals_air: true
+  seaport:
+    code: SP
+    defense: 3
+    capturable: true
+    profitable: true
+    heals_sea: true
+  temp_seaport:
+    code: TS
+    defense: 1
+    capturable: true
+    heals_sea: true
+  lab:
+    code: LB
+    defense: 3
+    capturable: true
+  teletile:
+    code: TT
+    defense: 0
+  pillar:
+    code: PI
+    defense: 0
+  meteor:
+    code: ME
+    defense: 0
+  missile_silo:
+    code: SR
+    defense: 3
+  spent_missile_silo:
+    code: BK
+    defense: 3
+  ds_tower:
+    code: TW
+    defense: 3
+    capturable: true
+  dor_tower:
+    code: T4
+    defense: 3
+    capturable: true
+    profitable: true

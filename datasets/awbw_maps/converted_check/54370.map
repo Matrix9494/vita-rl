@@ -1,0 +1,28 @@
+  SR  PI  SE  RF  SE  SE  SE  SE  SE  SE  SE  RF  SE  RF  SE  SE  SE  RF  SE  SE  SE  RF  SE  SE
+  PI  SH  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE
+  SE  SE  SE  RF  RF  SE  SE  RF  SE  SE  SE  SE  RF  RF  RF  SE  SE  SE  SE  SE  RF  SE  SE  SE
+  SE  SP  SH  SH  SH  SH  SH  SH  RV  CT  SH  SH  SH  SH  SH  SH  CT  SH  SH 1SP  SH  SH  SH  SE
+  SE  BK  GR  GR  GR  CT  GR  GR  RV  GR  FR  FR  GR  GR  GR  MT  MT  GR  GR  BK  GR  CT  CT  SE
+  SE  GR  GR 0FC  GR  GR  GR  GR  RV  GR  GR  FC  PI  PI  GR  BK  GR  GR  FR  GR  GR  GR  FR  SE
+  SE  FR  GR  GR  GR  FR  GR  RV  RV  FR  GR  GR  GR  PI  CT  GR  RD  RD  CT  GR  FR  MT  MT  SE
+  SE  FR  GR  CT  GR  GR  RD  BR  RD  RD  RD  RD  GR  PI  FR  GR  RD  GR  GR  GR  GR  FR  SH  SE
+  SE  GR  MT 0FC  MT  FR  RD  RV  FR  GR  GR  RD  GR  PI  FR  MT  RD  RD  MT  GR  CT  GR  GR  SE
+  SE  GR  GR  GR  GR  GR  CT  RV  RV  RV  CT  BK  GR  TW  GR  GR  AP  RD  RD  RD  GR  GR  CT  SE
+  SE  MT  GR  GR  FR  RD  RD  FR  GR  RV  SE  RD  GR  GR  GR  GR  SE  RV  RV  RD  RD  FR  GR  SE
+  SE  BK  CT  GR  RD  RD  GR 0HQ  GR  MT  FR  RD  GR  CT  FR  GR  GR  CT  RV  RV  BR  RV  RV  SE
+  SE  GR  GR  RD  RD  GR  FR  GR  GR  LB  GR  RD  RD  GR  LB  GR  GR  FR  GR  RD  RD  GR  GR  SE
+  SE  RV  RV  BR  RV  RV  CT  GR  GR  FR  CT  GR  RD  FR  MT  GR 1HQ  GR  RD  RD  GR  CT  BK  SE
+  SE  FR  GR  RD  RD  RV  RV  SE  GR  GR  GR  GR  RD  SE  RV  GR  FR  RD  RD  FR  GR  GR  MT  SE
+  SE  CT  GR  GR  RD  RD  RD  AP  GR  GR  TW  GR  BK  CT  RV  RV  RV  CT  GR  GR  GR  GR  GR  SE
+  SE  GR  GR  CT  GR  MT  RD  RD  MT  FR  PI  GR  RD  GR  GR  FR  RV  RD  FR  MT 1FC  MT  GR  SE
+  SE  SH  FR  GR  GR  GR  GR  RD  GR  FR  PI  GR  RD  RD  RD  RD  BR  RD  GR  GR  CT  GR  FR  SE
+  SE  MT  MT  FR  GR  CT  RD  RD  GR  CT  PI  GR  GR  GR  FR  RV  RV  GR  FR  GR  GR  GR  FR  SE
+  SE  FR  GR  GR  GR  FR  GR  GR  BK  GR  PI  PI  FC  GR  GR  RV  GR  GR  GR  GR 1FC  GR  GR  SE
+  SE  CT  CT  GR  BK  GR  GR  MT  MT  GR  GR  GR  FR  FR  GR  RV  GR  GR  CT  GR  GR  GR  BK  SE
+  SE  SH  SH  SH 0SP  SH  SH  CT  SH  SH  SH  SH  SH  SH  CT  RV  SH  SH  SH  SH  SH  SH  SP  SE
+  SE  SE  SE  RF  SE  SE  SE  SE  SE  RF  RF  RF  SE  SE  SE  SE  RF  SE  SE  RF  RF  SE  SE  SE
+  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SE  SH  PI
+  SE  SE  RF  SE  SE  SE  RF  SE  SE  SE  RF  SE  RF  SE  SE  SE  SE  SE  SE  SE  RF  SE  PI  SR
+
+0, Infantry, 7, 11
+1, Infantry, 16, 13

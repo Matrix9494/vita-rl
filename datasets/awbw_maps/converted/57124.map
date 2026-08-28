@@ -1,0 +1,23 @@
+  CT  CT  CT  FR  RV  RV  RV  RV  CT  CT  SE  SE  SE  FR  GR  GR  BK  FR  MT  MT  SE  SE  SE
+  MT  RV  RV  RV  RV  CT  SH  SE  SE  SE  SE  MT  FR  GR  GR  FR  GR  GR  FR  SP  SE  SE  SE
+  RV  RV  FR  SH  SE  SE  SE  RF  RF  SE  GR  SH  SH  AP  MT  RD  AP  BR  RD  RD  SE  RF  SE
+  CT  CT  SH  SE  SE  RF  SE  SE  SE  SE  SP  SH  SH  MT  MT  PI  MT  FR  GR  MT  SE  SE  RF
+  RV  RV  SE  RF  RF  SE  SE  BK  GR  GR  FR  FR  BK  GR  GR  RD  GR  FR  AP  MT  SE  SE  RF
+  BK  SE  RF  SE  SE  GR  FR  FR 0FC  FR  GR  GR  CT  FR  LB  RD  RD  RD  RD  RD  SE  SE  RF
+  SH  SE  RF  SE  RD  RD  RD  GR  GR  BK  PI  PI  GR  BK  MT  CT  FR  SH  SH  RD  SE  SE  RF
+  SE  RF  SE  RD  RD  CT  RD  GR  BK  PI  PI  PI  GR  GR  FR  MT  GR  SH  SH  BR  SE  SE  RF
+  RF  RF  SE  RD  SH  SH  RD  GR  PI  PI 0HQ  RD  CT  RD  GR  GR  CT  GR  GR  RD  SE  SE  RF
+  RF  RF  SE  BR  SH  SH  RD 0FC  PI  TW  GR  BR  FR  RD  BR  BR  RD  FR  GR  AP  SE  RF  RF
+  RF  RF  SE  AP  GR  FR  RD  BR  BR  RD  FR  BR  GR  TW  PI 1FC  RD  SH  SH  BR  SE  RF  RF
+  RF  SE  SE  RD  GR  GR  CT  GR  GR  RD  CT  RD 1HQ  PI  PI  GR  RD  SH  SH  RD  SE  RF  RF
+  RF  SE  SE  BR  SH  SH  GR  MT  FR  GR  GR  PI  PI  PI  BK  GR  RD  CT  RD  RD  SE  RF  SE
+  RF  SE  SE  RD  SH  SH  FR  CT  MT  BK  GR  PI  PI  BK  GR  GR  RD  RD  RD  SE  RF  SE  SH
+  RF  SE  SE  RD  RD  RD  RD  RD  LB  FR  CT  GR  GR  FR 1FC  FR  FR  GR  SE  SE  RF  SE  BK
+  RF  SE  SE  MT  AP  FR  GR  RD  GR  GR  BK  FR  FR  GR  GR  BK  SE  SE  RF  RF  SE  RV  RV
+  RF  SE  SE  MT  GR  FR  MT  PI  MT  MT  SH  SH  SP  SE  SE  SE  SE  RF  SE  SE  SH  CT  CT
+  SE  RF  SE  RD  RD  BR  AP  RD  MT  AP  SH  SH  GR  SE  RF  RF  SE  SE  SE  SH  FR  RV  RV
+  SE  SE  SE  SP  FR  GR  GR  FR  GR  GR  FR  MT  SE  SE  SE  SE  SH  CT  RV  RV  RV  RV  MT
+  SE  SE  SE  MT  MT  FR  BK  GR  GR  FR  SE  SE  SE  CT  CT  RV  RV  RV  RV  FR  CT  CT  CT
+
+0, Infantry, 10, 8
+1, Infantry, 12, 11

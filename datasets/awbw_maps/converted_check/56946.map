@@ -1,0 +1,25 @@
+  AP  BK  MT  FR  CT  RD  RD  BR  CT  BR  RD  RD  RD  RD  CT  FR  FR  MT  RV  BR  SH  CT
+  BK  FR  FR  FR  SH  BR  BR  RV  RV  SH  FR 0FC  GR  RD  RD  RD  RD  RD  RD  AP  RV  RV
+  MT  MT  FR  MT  RV  RD  CT  GR  FR  FR  GR  GR  GR  GR  GR  FR  CT  FR  RD  MT  MT  MT
+  MT  FR  FR  RD  BR  RD  RD  GR  GR  GR  GR  GR  MT  CT  FR  GR  GR  BK  RD  RD  RD  CT
+  FR  GR  FR  CT  RV  FR  GR  PI  FC  PI  PI  PI  PI  PI  MT  FR  GR  FR  CT  BK  RD  MT
+  CT  SH  RV  BR  SH  GR  PI  PI  BK  GR  FR  CT  FR  PI  PI  CT  GR  GR  GR  FR  RD  RD
+  GR  BR  GR  RD  RD  PI  PI  BK  GR  FR  GR  GR  GR  GR  PI  PI  GR  LB  GR  FR  CT  RD
+  BR  RV  GR  PI 0FC  PI  BK  FR  GR  GR  GR  FR  GR  BK  GR  PI  MT  FR  GR  GR  GR  GR
+  GR  CT  BK  PI  RD  BK  GR  GR  SP  SE  SE  SH  GR  GR  FR  PI  PI  BK  GR  GR  FR  BK
+  GR  GR  BK  PI  RD  RD  RD  FR  BR  SE  SE  SE  SH  CT  GR  TW  PI  PI  GR 1HQ  GR  GR
+  FR  GR  GR  PI  FR  CT  RD  RD  RD  SE  RF  SE  SH  GR  RD  RD  GR  PI  PI  CT  GR  FR
+  FR  GR  CT  PI  PI  GR  RD  RD  GR  SH  SE  RF  SE  RD  RD  RD  CT  FR  PI  GR  GR  FR
+  GR  GR 0HQ  GR  PI  PI  TW  GR  CT  SH  SE  SE  SE  BR  FR  RD  RD  RD  PI  BK  GR  GR
+  BK  FR  GR  GR  BK  PI  PI  FR  GR  GR  SH  SE  SE  SP  GR  GR  BK  RD  PI  BK  CT  GR
+  GR  GR  GR  GR  FR  MT  PI  GR  BK  GR  FR  GR  GR  GR  FR  BK  PI 1FC  PI  GR  RV  BR
+  RD  CT  FR  GR  LB  GR  PI  PI  GR  GR  GR  GR  FR  GR  BK  PI  PI  RD  RD  GR  BR  GR
+  RD  RD  FR  GR  GR  GR  CT  PI  PI  FR  CT  FR  GR  BK  PI  PI  GR  SH  BR  RV  SH  CT
+  MT  RD  BK  CT  FR  GR  FR  MT  PI  PI  PI  PI  PI  FC  PI  GR  FR  RV  CT  FR  GR  FR
+  CT  RD  RD  RD  BK  GR  GR  FR  CT  MT  GR  GR  GR  GR  GR  RD  RD  BR  RD  FR  FR  MT
+  MT  MT  MT  RD  FR  CT  GR  GR  GR  GR  GR  GR  FR  FR  GR  CT  RD  RV  MT  FR  MT  MT
+  RV  RV  AP  RD  RD  RD  RD  RD  RD  GR 1FC  FR  SH  RV  RV  BR  BR  SH  FR  FR  FR  BK
+  CT  SH  BR  RV  MT  FR  FR  CT  RD  RD  RD  RD  BR  CT  BR  RD  RD  CT  FR  MT  BK  AP
+
+0, Infantry, 2, 12
+1, Infantry, 19, 9
