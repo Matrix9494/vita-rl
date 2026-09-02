@@ -1,4 +1,0 @@
-name: infantry_only
-enabled_units:
-  - infantry
-strict_units: false

@@ -1,1 +1,0 @@
-"""Packaged simulator data."""

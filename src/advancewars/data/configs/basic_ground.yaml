@@ -1,9 +1,0 @@
-name: basic_ground
-enabled_units:
-  - infantry
-  - mech
-  - apc
-  - recon
-  - tank
-  - artillery
-strict_units: false
