@@ -6,6 +6,7 @@ VITA_ROOT="${VITA_ROOT:-/workspace/projects/vitabench}"
 QWEN_MODEL="${QWEN_MODEL:-/workspace/models/Qwen3.5-4B}"
 VITA_VENV="${VITA_VENV:-/workspace/venvs/vita}"
 SGLANG_BASE_URL="${SGLANG_BASE_URL:-http://127.0.0.1:30000/v1/chat/completions}"
+SMOKE_OUTPUT="${SMOKE_OUTPUT:-smoke_qwen35_4b_$(date +%Y%m%d_%H%M%S)}"
 
 for path in "$VITA_ROOT" "$QWEN_MODEL" "$VITA_VENV"; do
   [[ -e "$path" ]] || { echo "Required external path not found: $path" >&2; exit 1; }
@@ -26,5 +27,5 @@ exec "$SCRIPT_DIR/run_baseline.sh" \
   --evaluator-llm gpt-4.1 \
   --num-trials 1 \
   --max-steps 300 \
-  --output smoke_qwen35_4b \
+  --output "$SMOKE_OUTPUT" \
   --language english

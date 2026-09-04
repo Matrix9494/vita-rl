@@ -37,6 +37,7 @@ The script runs delivery task `10711001` once with a maximum of 300 steps.
 It expects the VitaBench checkout, model, venv, and SGLang endpoint at the
 paths above. Use `VITA_ROOT`, `VITA_VENV`, `QWEN_MODEL`, or
 `SGLANG_BASE_URL` to override them when appropriate.
+Set `SMOKE_OUTPUT` when a stable VitaBench save-to name is preferred.
 
 OpenRouter credentials are injected externally through the GiveMeANode secret
 named `openrouter` (as `OPENROUTER_API_KEY`). They are never written to this
