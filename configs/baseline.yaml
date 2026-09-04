@@ -1,0 +1,14 @@
+# Benchmark-level settings only. Runtime paths and credentials stay external.
+benchmark: vitabench
+domain: delivery
+task_ids:
+  - "10711001"
+num_trials: 1
+max_steps: 300
+max_concurrency: 1
+language: english
+
+roles:
+  agent: llm_agent
+  user: user_simulator
+  evaluator: gpt-4.1

@@ -1,0 +1,10 @@
+# External runtime settings for the standard local-agent baseline.
+# This file contains paths and model names only; credentials are injected by
+# GiveMeANode and the launch script creates the complete temporary config.
+agent_model: /workspace/models/Qwen3.5-4B
+agent_endpoint: http://127.0.0.1:30000/v1/chat/completions
+agent_thinking: false
+vitabench_root: /workspace/projects/vitabench
+vita_venv: /workspace/venvs/vita
+user_model: gpt-4.1
+evaluator_model: gpt-4.1

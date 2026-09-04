@@ -1,3 +1,26 @@
-# Hillclimb hook files
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Python and tooling
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Logs and generated experiment artifacts
+*.log
+outputs/
+data/
+trajectories/
+checkpoints/
+models/
+wandb/
+
+# Local-only Codex hook files
 /.codex/hooks.json
 /.codex/hooks.json.malformed-*
