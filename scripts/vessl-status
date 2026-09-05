@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec ssh vessl-vita 'bash -s' <<'REMOTE'
+#!/usr/bin/env bash
+
+failure=0
+
+if ! source /root/setup_env.sh; then
+  printf '[FAIL] Could not source /root/setup_env.sh\n' >&2
+  exit 2
+fi
+
+printf '[OK] Host: %s\n' "$(hostname)"
+
+if gpu_info="$(nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader 2>/dev/null)"; then
+  while IFS= read -r gpu; do
+    [[ -n "$gpu" ]] && printf '[OK] GPU: %s\n' "$gpu"
+  done <<<"$gpu_info"
+else
+  printf '[FAIL] GPU status is unavailable\n' >&2
+  failure=1
+fi
+
+if [[ -z "${SGLANG_BASE_URL:-}" ]]; then
+  printf '[WARN] SGLANG_BASE_URL is not set\n'
+elif ! command -v curl >/dev/null 2>&1; then
+  printf '[WARN] curl is unavailable; cannot check SGLang\n'
+else
+  models_url="${SGLANG_BASE_URL%/}"
+  case "$models_url" in
+    */v1/*)
+      models_url="${models_url%%/v1/*}/v1/models"
+      ;;
+    */v1)
+      models_url="${models_url}/models"
+      ;;
+    *)
+      models_url="${models_url}/v1/models"
+      ;;
+  esac
+
+  if models_json="$(curl --fail --silent --show-error --max-time 5 "$models_url" 2>/dev/null)"; then
+    model_names="$(python3 -c '
+import json
+import sys
+payload = json.load(sys.stdin)
+models = payload.get("data", [])
+print(", ".join(str(model.get("id", "<unnamed>")) for model in models) or "<none>")
+' <<<"$models_json" 2>/dev/null || true)"
+    if [[ -n "$model_names" ]]; then
+      printf '[OK] SGLang reachable; served model(s): %s\n' "$model_names"
+    else
+      printf '[WARN] SGLang reachable, but /v1/models was not parseable\n'
+    fi
+  else
+    printf '[WARN] SGLang /v1/models is not reachable\n'
+  fi
+fi
+
+repo=/root/projects/vita-rl
+if branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)" \
+  && commit="$(git -C "$repo" rev-parse --short HEAD 2>/dev/null)"; then
+  printf '[OK] vita-rl: %s @ %s\n' "$branch" "$commit"
+  if changes="$(git -C "$repo" status --short 2>/dev/null)"; then
+    if [[ -n "$changes" ]]; then
+      printf '[WARN] vita-rl working tree changes:\n%s\n' "$changes"
+    else
+      printf '[OK] vita-rl working tree clean\n'
+    fi
+  else
+    printf '[WARN] Could not read vita-rl working-tree status\n'
+  fi
+else
+  printf '[FAIL] vita-rl repository is unavailable at %s\n' "$repo" >&2
+  failure=1
+fi
+
+missing_paths=()
+for path in \
+  /root/projects/vita-rl \
+  /root/projects/vitabench \
+  /root/Dressage \
+  /root/Megatron-LM \
+  /root/models; do
+  [[ -e "$path" ]] || missing_paths+=("$path")
+done
+
+if (( ${#missing_paths[@]} == 0 )); then
+  printf '[OK] Required persistent paths are present\n'
+else
+  printf '[WARN] Missing persistent path(s): %s\n' "${missing_paths[*]}"
+fi
+
+exit "$failure"
+REMOTE

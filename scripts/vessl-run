@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (( $# == 0 )); then
+  printf 'Usage: %s <remote-command>\n' "${0##*/}" >&2
+  exit 2
+fi
+
+command_text="$*"
+encoded_command="$(printf '%s' "$command_text" | base64 | tr -d '\n')"
+
+exec ssh vessl-vita bash -s -- "$encoded_command" <<'REMOTE'
+#!/usr/bin/env bash
+
+if ! source /root/setup_env.sh; then
+  printf 'Could not source /root/setup_env.sh\n' >&2
+  exit 2
+fi
+
+if ! cd /root/projects/vita-rl; then
+  printf 'Could not enter /root/projects/vita-rl\n' >&2
+  exit 2
+fi
+
+if ! command_text="$(printf '%s' "$1" | base64 --decode)"; then
+  printf 'Could not decode remote command\n' >&2
+  exit 2
+fi
+
+exec bash -c "$command_text"
+REMOTE

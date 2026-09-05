@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec ssh vessl-vita 'bash -s' <<'REMOTE'
+#!/usr/bin/env bash
+
+if ! source /root/setup_env.sh; then
+  printf 'Could not source /root/setup_env.sh\n' >&2
+  exit 2
+fi
+
+exec /root/projects/vita-rl/scripts/resume_stack.sh
+REMOTE
