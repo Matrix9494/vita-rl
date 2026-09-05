@@ -121,7 +121,6 @@ Path(path).write_text(
     Content-Type: application/json
 models:
   - name: gpt-4.1
-    model: openai/gpt-4.1
     max_tokens: 4096
   - name: {json.dumps(agent_model)}
     base_url: {json.dumps(agent_endpoint)}
