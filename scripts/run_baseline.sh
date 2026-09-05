@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 usage() {
   cat <<'EOF'
 Usage: run_baseline.sh [options]
@@ -52,9 +54,30 @@ done
 VITA_ROOT="${VITA_ROOT:-/workspace/projects/vitabench}"
 VITA_VENV="${VITA_VENV:-/workspace/venvs/vita}"
 SGLANG_BASE_URL="${SGLANG_BASE_URL:-http://127.0.0.1:30000/v1/chat/completions}"
+PYTHON_BIN="${PYTHON_BIN:-$VITA_VENV/bin/python}"
+
+MODEL_CONFIG=""
+PROXY_PID=""
+PROXY_INFO=""
+CLEANUP_CONFIG=0
+
+cleanup() {
+  status=$?
+  if [[ -n "$PROXY_PID" ]]; then
+    kill "$PROXY_PID" 2>/dev/null || true
+    wait "$PROXY_PID" 2>/dev/null || true
+  fi
+  [[ -n "$PROXY_INFO" ]] && rm -f "$PROXY_INFO"
+  if [[ "$CLEANUP_CONFIG" -eq 1 && -n "$MODEL_CONFIG" ]]; then
+    rm -f "$MODEL_CONFIG"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
 
 [[ -d "$VITA_ROOT" ]] || { echo "VitaBench checkout not found: $VITA_ROOT" >&2; exit 1; }
 [[ -x "$VITA_VENV/bin/vita" ]] || { echo "VitaBench CLI not found: $VITA_VENV/bin/vita" >&2; exit 1; }
+[[ -x "$PYTHON_BIN" ]] || { echo "Python interpreter not found: $PYTHON_BIN" >&2; exit 1; }
 [[ -d "$AGENT_LLM" ]] || { echo "Local agent model not found: $AGENT_LLM" >&2; exit 1; }
 
 if [[ -n "${VITA_MODEL_CONFIG_PATH:-}" ]]; then
@@ -66,24 +89,39 @@ else
     echo "OPENROUTER_API_KEY is not set; inject GiveMeANode secret 'openrouter' or set VITA_MODEL_CONFIG_PATH." >&2
     exit 1
   }
+  PROXY_INFO="$(mktemp "${TMPDIR:-/tmp}/vita-rl-openrouter.XXXXXX")"
+  "$PYTHON_BIN" "$SCRIPT_DIR/openrouter_proxy.py" --port-file "$PROXY_INFO" \
+    >/dev/null 2>&1 &
+  PROXY_PID=$!
+  for _ in {1..100}; do
+    [[ -s "$PROXY_INFO" ]] && break
+    kill -0 "$PROXY_PID" 2>/dev/null || {
+      echo "OpenRouter proxy failed to start" >&2
+      exit 1
+    }
+    sleep 0.1
+  done
+  [[ -s "$PROXY_INFO" ]] || { echo "OpenRouter proxy did not become ready" >&2; exit 1; }
+  PROXY_PORT="$(<"$PROXY_INFO")"
+  PROXY_BASE_URL="http://127.0.0.1:${PROXY_PORT}/v1/chat/completions"
   MODEL_CONFIG="$(mktemp "${TMPDIR:-/tmp}/vita-rl-models.XXXXXX.yaml")"
   CLEANUP_CONFIG=1
-  trap 'rm -f "$MODEL_CONFIG"' EXIT
-  python - "$MODEL_CONFIG" "$AGENT_LLM" "$SGLANG_BASE_URL" "$OPENROUTER_API_KEY" <<'PY'
+  "$PYTHON_BIN" - "$MODEL_CONFIG" "$AGENT_LLM" "$SGLANG_BASE_URL" "$PROXY_BASE_URL" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-path, agent_model, agent_endpoint, api_key = sys.argv[1:]
+path, agent_model, agent_endpoint, proxy_endpoint = sys.argv[1:]
 Path(path).write_text(
     f"""default:
-  base_url: https://openrouter.ai/api/v1/chat/completions
+  base_url: {json.dumps(proxy_endpoint)}
   temperature: 0.0
   headers:
-    Authorization: Bearer {api_key}
+    Authorization: Bearer vita-rl-local-proxy
     Content-Type: application/json
 models:
   - name: gpt-4.1
+    model: openai/gpt-4.1
     max_tokens: 4096
   - name: {json.dumps(agent_model)}
     base_url: {json.dumps(agent_endpoint)}
@@ -97,6 +135,7 @@ fi
 
 if [[ "$CLEANUP_CONFIG" -eq 1 ]]; then
   export VITA_MODEL_CONFIG_PATH="$MODEL_CONFIG"
+  unset OPENROUTER_API_KEY
 fi
 
 cd "$VITA_ROOT"

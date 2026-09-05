@@ -42,7 +42,10 @@ Set `SMOKE_OUTPUT` when a stable VitaBench save-to name is preferred.
 OpenRouter credentials are injected externally through the GiveMeANode secret
 named `openrouter` (as `OPENROUTER_API_KEY`). They are never written to this
 repository. The launch wrapper creates and removes a temporary runtime model
-configuration when that environment variable is present. Alternatively,
+configuration when that environment variable is present. The default path uses
+a short-lived localhost proxy so the real key stays only in the proxy process;
+VitaBench receives a harmless placeholder header and cannot serialize the key.
+Alternatively,
 `VITA_MODEL_CONFIG_PATH` may point to an already prepared external config.
 
 ## Baseline runner
