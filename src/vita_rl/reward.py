@@ -41,4 +41,11 @@ def compute_smoke_dense_reward(sample: Any, **_kwargs: Any) -> float:
         turns = max(0, int(metadata.get("vita_num_agent_turns", 0)))
     except (TypeError, ValueError) as exc:
         raise ValueError("vita_num_agent_turns must be an integer") from exc
-    return terminal + min(turns, 300) / 300.0
+    try:
+        final_response_tokens = max(0, int(getattr(sample, "response_length", 0)))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("response_length must be an integer") from exc
+    # The four samples in a GRPO group can reach the same terminal state and
+    # make the terminal/progress signal degenerate. The final generated length
+    # remains an observed trajectory property and distinguishes those samples.
+    return terminal + min(turns, 300) / 300.0 + min(final_response_tokens, 1024) / 102400.0
