@@ -118,29 +118,40 @@ The stateful mode preserves the callback order:
 previous assistant action -> user/tool observation -> TaskState update -> next Qwen action
 ```
 
-`TaskState` is a dataclass with persistent `constraints`, `entities`,
-`transactions`, `subgoals`, `open_questions`, `termination`, and
-`debug_traces`. Constraints retain their source turn/text, desired value,
-status (`known`, `satisfied`, `violated`, or `unknown`), and tool-visible
-evidence. Entities record ID, type, domain, attributes, discovery turn, and
-valid tool namespace. Transactions record type, entity, items, quantities,
-date/time, location, world status, payment status, and last evidence turn.
+`TaskState` is a dataclass with a persistent active goal, normalized
+constraints, observed world facts, typed entities and relations, candidates,
+execution state, transactions, subgoals, progress, genuine open questions,
+and debug traces. Constraints retain source turn/text, desired value, status
+(`known`, `satisfied`, `violated`, or `unknown`), and tool-visible evidence.
+The renderer explicitly separates desired requirements from observed or derived
+facts, and prints exact valid IDs so later tool calls need not reconstruct or
+shorten identifiers.
 
-Extraction is deterministic and conservative: explicit quantity/item, ISO or
-month-name dates, before/after/around/at time, delivery address, party size,
-room/ticket/seat type, store/hotel preference, required/forbidden attributes,
-payment, and cancellation language are recognized. Unparsed user requests are
-kept as observable open questions rather than guessed. Constraints from later
-turns are additive unless the text explicitly says to change, replace, update,
-or use something instead.
+Extraction is deterministic and conservative: explicit quantity/item, food
+category and mild/forbidden food attributes, fulfillment mode and destination,
+provider constraints, novelty, dates, deadlines, party size, payment, and
+cancellation language are recognized independently. A parser miss is retained
+as bounded **unparsed goal evidence** visible to the agent, not fabricated as
+an open question. Open questions are reserved for genuinely missing information
+needed for fulfillment. Domain resolution prioritizes an explicit user switch,
+then active execution/subgoals and the active goal, before loose lexical cues.
+Constraints from later turns are additive unless the text explicitly says to
+change, replace, update, or use something instead.
 
-Only confirmed tool responses create or modify transactions. Successful tool
-representations supply product names and quantities; confirmed provider IDs are
-typed into the entity registry. Reconciliation compares desired quantity,
-item, date, address, party size, payment, and cancellation against those
-transactions. `can_stop` is true only when there are no unresolved or
+Only confirmed tool responses create or modify transactions, facts, entities,
+or candidate evidence. Repeated observations update the same fact/entity rather
+than growing duplicate state. Product/store observations supply names, tags,
+scores, locations, coordinates, and relations; candidate suitability records
+what is confirmed, contradicted, or still unknown. Negative dietary restrictions
+are never considered met merely because an item is mild. `can_stop` additionally
+requires the active goal to be completed or abandoned and no unresolved or
 violated constraints, pending/active subgoals, failed transactions, or open
 questions. This flag is advisory: it never emits or blocks an agent stop.
+
+Trace records include full observable before/after snapshots plus a compact
+grouped diff for goal, constraints, facts, entities, candidates, execution,
+progress, and termination. The model context remains compressed: policy,
+rendered state, and exactly one latest observation--never a restored transcript.
 
 Each launcher starts `scripts/openrouter_proxy.py` on a short-lived localhost
 port. The job must receive `OPENROUTER_API_KEY`; the relay inherits it and the
