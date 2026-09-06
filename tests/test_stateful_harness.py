@@ -36,7 +36,8 @@ def test_stateful_agent_updates_state_before_next_action(monkeypatch):
         "tool_calls": [],
     }
     state_prompt = captured["messages"][0].content
-    assert '"latest_user_request": "Find me lunch."' in state_prompt
+    assert "[CURRENT TASK STATE]" in state_prompt
+    assert '"pending_action": null' in state_prompt
 
 
 def test_stateful_agent_observation_resolves_prior_action(monkeypatch):
@@ -68,7 +69,7 @@ def test_stateful_agent_observation_resolves_prior_action(monkeypatch):
 
     # The second action sees the new tool observation, while its own action is
     # recorded only after generation for the following transition.
-    assert '"name": "search"' in prompts[1]
+    assert "[CURRENT TASK STATE]" in prompts[1]
     assert '"pending_action": null' in prompts[1]
     assert state.working_state.turn == 2
     assert state.working_state.pending_action["content"] == "action 2"

@@ -9,7 +9,10 @@ generation call exactly.
 
 from __future__ import annotations
 
+import json
+import os
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Optional
 
 from loguru import logger
@@ -186,10 +189,27 @@ all user constraints are satisfied by actual tool-confirmed state.
         return {
             "content": message.content or "",
             "tool_calls": [
-                {"name": call.name, "arguments": call.arguments}
+                {"id": call.id, "name": call.name, "arguments": call.arguments}
                 for call in (message.tool_calls or [])
             ],
         }
+
+    @staticmethod
+    def _save_new_traces(state: StatefulHarnessState, trace_start: int) -> None:
+        """Append state transitions to an optional, job-scoped JSONL trace.
+
+        The launcher sets ``VITA_STATE_TRACE_PATH``. The tracker always keeps
+        its in-memory traces, while this opt-in sink makes a real trajectory
+        inspectable after VitaBench finishes without altering VitaBench output.
+        """
+        trace_path = os.environ.get("VITA_STATE_TRACE_PATH")
+        if not trace_path:
+            return
+        path = Path(trace_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            for trace in state.working_state.task_state.debug_traces[trace_start:]:
+                handle.write(json.dumps(trace, ensure_ascii=False, sort_keys=True) + "\n")
 
     def get_init_state(
         self, message_history: Optional[list[Message]] = None
@@ -220,6 +240,7 @@ all user constraints are satisfied by actual tool-confirmed state.
     ) -> tuple[AssistantMessage, StatefulHarnessState]:
         # This is the state-update phase: a new observation resolves the
         # previous pending action before the next action is requested.
+        trace_start = len(state.working_state.task_state.debug_traces)
         state.working_state.observe(self._observation(message))
         if isinstance(message, MultiToolMessage):
             state.messages.extend(message.tool_messages)
@@ -247,6 +268,7 @@ all user constraints are satisfied by actual tool-confirmed state.
         )
         state.messages.append(assistant_message)
         state.working_state.record_action(self._action(assistant_message))
+        self._save_new_traces(state, trace_start)
         return assistant_message, state
 
 

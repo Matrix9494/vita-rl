@@ -91,10 +91,52 @@ external VitaBench checkout.
 `VITA_AGENT_IMPLEMENTATION=vita_rl_stateful`. It implements an explicit
 action/observation state machine: the prior action is recorded, the next user
 or tool observation advances `AgentWorkingState`, and the next action is
-generated from that state plus the normal trajectory. The state is maintained
-in `src/vita_rl/state.py` and includes recent observations/actions, latest
-user request/tool results, pending action, and tool-error count. The baseline
-remains the default; no external VitaBench source is modified for either mode.
+generated from that state plus the normal trajectory. `TaskState` is maintained
+incrementally in `src/vita_rl/state.py`; it contains persistent constraints,
+typed entities, confirmed transactions, subgoals, open questions, and a
+derived termination state. It receives only user text, assistant tool calls,
+and tool responses--not task metadata or evaluator data. Full VitaBench
+history remains in the request, so this is the intended A/B experiment:
+standard is `pi(history)` and stateful is `pi(history, structured_state)`.
+
+For `vita_rl_stateful`, `vita_single.sbatch` writes one JSONL record for every
+observation/action transition to
+`outputs/vita_state_trace-<job-id>.jsonl` (or `VITA_STATE_TRACE_PATH` if set).
+Each record includes the event, state before and after, rendered state,
+constraint counts, and `can_stop`. The trace is produced by root-owned code;
+VitaBench itself remains unmodified. The baseline remains the default.
+
+### Structured stateful harness
+
+The stateful mode preserves the callback order:
+
+```text
+previous assistant action -> user/tool observation -> TaskState update -> next Qwen action
+```
+
+`TaskState` is a dataclass with persistent `constraints`, `entities`,
+`transactions`, `subgoals`, `open_questions`, `termination`, and
+`debug_traces`. Constraints retain their source turn/text, desired value,
+status (`known`, `satisfied`, `violated`, or `unknown`), and tool-visible
+evidence. Entities record ID, type, domain, attributes, discovery turn, and
+valid tool namespace. Transactions record type, entity, items, quantities,
+date/time, location, world status, payment status, and last evidence turn.
+
+Extraction is deterministic and conservative: explicit quantity/item, ISO or
+month-name dates, before/after/around/at time, delivery address, party size,
+room/ticket/seat type, store/hotel preference, required/forbidden attributes,
+payment, and cancellation language are recognized. Unparsed user requests are
+kept as observable open questions rather than guessed. Constraints from later
+turns are additive unless the text explicitly says to change, replace, update,
+or use something instead.
+
+Only confirmed tool responses create or modify transactions. Successful tool
+representations supply product names and quantities; confirmed provider IDs are
+typed into the entity registry. Reconciliation compares desired quantity,
+item, date, address, party size, payment, and cancellation against those
+transactions. `can_stop` is true only when there are no unresolved or
+violated constraints, pending/active subgoals, failed transactions, or open
+questions. This flag is advisory: it never emits or blocks an agent stop.
 
 Each launcher starts `scripts/openrouter_proxy.py` on a short-lived localhost
 port. The job must receive `OPENROUTER_API_KEY`; the relay inherits it and the

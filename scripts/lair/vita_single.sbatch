@@ -30,12 +30,15 @@ RESULT="$REPO/outputs/vita_single-${JOB_TAG}.json"
 SUMMARY="$REPO/outputs/vita_diagnostic-${JOB_TAG}.json"
 SGLANG_SMOKE="$REPO/outputs/sglang_qwen35_smoke-${JOB_TAG}.json"
 OPENROUTER_LOG="$REPO/logs/openrouter-${JOB_TAG}.log"
+STATE_TRACE="${VITA_STATE_TRACE_PATH:-$REPO/outputs/vita_state_trace-${JOB_TAG}.jsonl}"
 
 mkdir -p "$REPO/logs" "$REPO/outputs"
 source "$VENV/bin/activate"
 export VITA_INPUT_TOKENIZER_PATH="$MODEL"
 export HF_HOME=/data/user/dz13/vita-rl/hf-cache
 export TRANSFORMERS_CACHE="$HF_HOME"
+export VITA_STATE_TRACE_PATH="$STATE_TRACE"
+echo "State trace: $VITA_STATE_TRACE_PATH"
 
 SGLANG_PID=""
 OPENROUTER_PID=""
