@@ -1,6 +1,7 @@
 # Local configuration and secrets
 .env
 .env.*
+/key
 !.env.example
 private.pem
 

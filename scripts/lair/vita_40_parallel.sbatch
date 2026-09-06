@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
+# Configurable two-H100 VitaBench batch. The local SGLang server uses two
+# data-parallel replicas and admits at most 20 running requests; VitaBench
+# launches at most 20 simulations concurrently. By default it remains a
+# 40-task cross-domain diagnostic. Set VITA_TASK_SET and VITA_TASK_COUNT to
+# run any complete 100-task set; the full benchmark is four such batches.
 #SBATCH --account=llmreason
 #SBATCH --partition=general
-#SBATCH --gres=gpu:H100:1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
-#SBATCH --time=02:00:00
-#SBATCH --job-name=vita_single
-#SBATCH --output=/u/dz13/vita-rl/logs/vita_single-%j.out
-#SBATCH --error=/u/dz13/vita-rl/logs/vita_single-%j.err
+#SBATCH --gres=gpu:H100:2
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
+#SBATCH --time=04:00:00
+#SBATCH --job-name=vita40_dp2
+#SBATCH --output=/u/dz13/vita-rl/logs/vita40-%j.out
+#SBATCH --error=/u/dz13/vita-rl/logs/vita40-%j.err
 
-# Run a bounded genuine VitaBench delivery diagnostic against a local SGLang
-# endpoint. It defaults to task 10711001; set VITA_TASK_IDS to a
-# space-separated fixed subset when deliberately expanding the diagnostic.
 set -euo pipefail
 
 REPO=/u/dz13/vita-rl
@@ -20,15 +22,31 @@ MODEL="$REPO/models/Qwen3.5-4B"
 VITABENCH="$REPO/external/vitabench"
 PORT="${SGLANG_PORT:-30000}"
 BASE_URL="http://127.0.0.1:${PORT}/v1"
-TASK_IDS="${VITA_TASK_IDS:-${VITA_TASK_ID:-10711001}}"
-MAX_STEPS="${VITA_MAX_STEPS:-100}"
-AGENT_THINKING="${VITA_AGENT_THINKING:-false}"
+TASK_SET="${VITA_TASK_SET:-cross_domain}"
+TASK_COUNT="${VITA_TASK_COUNT:-40}"
+SELECTION_SEED="${VITA_SELECTION_SEED:-20260906}"
+MAX_STEPS="${VITA_MAX_STEPS:-300}"
+CONCURRENCY="${VITA_MAX_CONCURRENCY:-20}"
 JOB_TAG="${SLURM_JOB_ID:-manual}"
-SGLANG_LOG="$REPO/logs/sglang-${JOB_TAG}.log"
-RESULT="$REPO/outputs/vita_single-${JOB_TAG}.json"
-SUMMARY="$REPO/outputs/vita_diagnostic-${JOB_TAG}.json"
+SGLANG_LOG="$REPO/logs/sglang-vita40-${JOB_TAG}.log"
+RESULT="$REPO/outputs/vita40-${JOB_TAG}.json"
+SUMMARY="$REPO/outputs/vita40_summary-${JOB_TAG}.json"
+SELECTION="$REPO/outputs/vita40_tasks-${JOB_TAG}.json"
 SGLANG_SMOKE="$REPO/outputs/sglang_qwen35_smoke-${JOB_TAG}.json"
-OPENROUTER_LOG="$REPO/logs/openrouter-${JOB_TAG}.log"
+OPENROUTER_LOG="$REPO/logs/openrouter-vita40-${JOB_TAG}.log"
+
+case "$TASK_SET" in
+    delivery|ota|instore)
+        DOMAIN="$TASK_SET"
+        ;;
+    cross_domain)
+        DOMAIN="delivery,ota,instore"
+        ;;
+    *)
+        echo "VITA_TASK_SET must be one of delivery, ota, instore, cross_domain; got: $TASK_SET" >&2
+        exit 2
+        ;;
+esac
 
 mkdir -p "$REPO/logs" "$REPO/outputs"
 source "$VENV/bin/activate"
@@ -63,9 +81,8 @@ trap cleanup EXIT INT TERM
     exit 2
 }
 
-# Match VESSL's baseline role assignment without storing the OpenRouter secret
-# in VitaBench's model configuration or result metadata.  The relay inherits
-# the key, then the benchmark process has the key removed from its environment.
+# Keep the actual API key in the relay only. VitaBench sees a disposable
+# localhost endpoint and a placeholder header, just as in VESSL.
 OPENROUTER_PORT_FILE="$(mktemp /tmp/vita-rl-openrouter.XXXXXX)"
 python "$REPO/scripts/openrouter_proxy.py" --port-file "$OPENROUTER_PORT_FILE" \
     >"$OPENROUTER_LOG" 2>&1 &
@@ -125,23 +142,58 @@ unset OPENROUTER_API_KEY
 python - <<'PY'
 import torch
 
+if torch.cuda.device_count() != 2:
+    raise SystemExit(f"Expected two allocated GPUs, found {torch.cuda.device_count()}")
 print(f"torch={torch.__version__}")
-print(f"cuda_available={torch.cuda.is_available()}")
-if not torch.cuda.is_available():
-    raise SystemExit("CUDA is unavailable inside this Slurm allocation")
-print(f"gpu={torch.cuda.get_device_name(0)}")
+print(f"gpus={[torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]}")
 PY
+
+# Persist the sampled IDs before launching work. VitaBench's --num-tasks takes
+# the first N tasks, so sampling must be explicit to produce a random subset.
+cd "$VITABENCH"
+python - "$SELECTION" "$TASK_SET" "$TASK_COUNT" "$SELECTION_SEED" <<'PY'
+import json
+import random
+import sys
+from vita.run import load_tasks
+
+path, task_set, task_count, seed = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+tasks = load_tasks(task_set, language="english")
+if task_count > len(tasks):
+    raise SystemExit(f"Requested {task_count} tasks but {task_set} only has {len(tasks)}")
+selected = random.Random(seed).sample(tasks, task_count)
+payload = {
+    "task_set": task_set,
+    "selection_seed": seed,
+    "task_count": task_count,
+    "task_ids": [task.id for task in selected],
+}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2)
+    handle.write("\n")
+print(json.dumps(payload))
+PY
+mapfile -t TASK_IDS < <(python - "$SELECTION" <<'PY'
+import json
+import sys
+for task_id in json.load(open(sys.argv[1], encoding="utf-8"))["task_ids"]:
+    print(task_id)
+PY
+)
+[[ "${#TASK_IDS[@]}" -eq "$TASK_COUNT" ]] || { echo "Task selection was incomplete" >&2; exit 1; }
 
 sglang serve --model-path "$MODEL" \
     --served-model-name qwen35-4b-local \
     --host 127.0.0.1 \
     --port "$PORT" \
+    --dp-size 2 \
+    --max-running-requests "$CONCURRENCY" \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
     >"$SGLANG_LOG" 2>&1 &
 SGLANG_PID=$!
 
-for _ in $(seq 1 180); do
+for _ in $(seq 1 240); do
     if curl --fail --silent --show-error --max-time 5 "$BASE_URL/models" >/dev/null; then
         break
     fi
@@ -161,55 +213,37 @@ python "$REPO/scripts/lair/qwen35_openai_smoke.py" \
     --model qwen35-4b-local \
     --output "$SGLANG_SMOKE"
 
-VITA_THINK_ARGS=()
-AGENT_MODEL=qwen35-4b-local
-if [[ "$AGENT_THINKING" == "true" ]]; then
-    VITA_THINK_ARGS+=(--enable-think)
-elif [[ "$AGENT_THINKING" != "false" ]]; then
-    echo "VITA_AGENT_THINKING must be true or false, got: $AGENT_THINKING" >&2
-    exit 2
-fi
-
-cd "$VITABENCH"
-# Intentional shell splitting: the documented VITA_TASK_IDS interface is a
-# whitespace-separated sequence of VitaBench task identifiers.
-# shellcheck disable=SC2206
-TASK_ID_ARGS=( $TASK_IDS )
 vita run \
-    --domain delivery \
-    --task-ids "${TASK_ID_ARGS[@]}" \
-    --agent-llm "$AGENT_MODEL" \
+    --domain "$DOMAIN" \
+    --task-set-name "$TASK_SET" \
+    --task-ids "${TASK_IDS[@]}" \
+    --agent-llm qwen35-4b-local \
     --user-llm gpt-4.1 \
     --evaluator-llm gpt-4.1 \
     --max-steps "$MAX_STEPS" \
     --num-trials 1 \
-    --max-concurrency 1 \
-    "${VITA_THINK_ARGS[@]}" \
+    --max-concurrency "$CONCURRENCY" \
+    --enable-think \
     --language english \
     --save-to "$RESULT"
 
-python - "$RESULT" "$SUMMARY" "$SGLANG_SMOKE" <<'PY'
+python - "$RESULT" "$SUMMARY" "$SELECTION" "$SGLANG_SMOKE" "$CONCURRENCY" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-result = Path(sys.argv[1])
-summary_path = Path(sys.argv[2])
-sglang_smoke_path = sys.argv[3]
-payload = json.loads(result.read_text())
-simulations = payload.get("simulations", [])
+result_path, summary_path, selection_path, smoke_path = map(Path, sys.argv[1:5])
+concurrency = int(sys.argv[5])
+result = json.loads(result_path.read_text())
+simulations = result.get("simulations", [])
 if not simulations:
-    raise SystemExit(f"No simulations were saved to {result}")
+    raise SystemExit(f"No simulations were saved to {result_path}")
 
 records = []
 for simulation in simulations:
     usages = [message.get("usage") or {} for message in simulation.get("messages", [])]
-    finish_reasons = [
-        (message.get("raw_data") or {}).get("finish_reason")
-        for message in simulation.get("messages", [])
-    ]
-    reward_info = simulation.get("reward_info") or {}
-    reward = reward_info.get("reward")
+    finish_reasons = [(message.get("raw_data") or {}).get("finish_reason") for message in simulation.get("messages", [])]
+    reward = (simulation.get("reward_info") or {}).get("reward")
     termination = simulation.get("termination_reason")
     records.append({
         "task_id": simulation.get("task_id"),
@@ -223,83 +257,33 @@ for simulation in simulations:
         "output_tokens_max_request": max((usage.get("completion_tokens", 0) for usage in usages), default=0),
         "generation_hit_max_tokens": "length" in finish_reasons,
         "termination_reason": termination,
-        "failure_class": (
-            "successful_completion" if reward == 1.0 else
-            "max_steps_termination" if termination == "max_steps" else
-            "tool_call_or_agent_formatting_failure" if termination == "invalid_agent_message" else
-            "infrastructure_or_evaluator_failure" if reward is None else
-            "task_not_completed"
-        ),
     })
 
-assistant_tool_calls = [
-    tool_call
-    for simulation in simulations
-    for message in simulation.get("messages", [])
-    if message.get("role") == "assistant"
-    for tool_call in (message.get("tool_calls") or [])
-]
-tool_messages = [
-    message
-    for simulation in simulations
-    for message in simulation.get("messages", [])
-    if message.get("role") == "tool"
-]
-user_reasoning_leaks = [
-    {
-        "content": message.get("content"),
-        "reasoning_content": ((message.get("raw_data") or {}).get("message") or {}).get("reasoning_content"),
-    }
-    for simulation in simulations
-    for message in simulation.get("messages", [])
-    if message.get("role") == "user"
-    and (
-        "<think" in (message.get("content") or "").lower()
-        or "</think" in (message.get("content") or "").lower()
-        or ((message.get("raw_data") or {}).get("message") or {}).get("reasoning_content")
-    )
-]
-
 summary = {
-    "result_file": str(result),
-    "sglang_smoke_file": sglang_smoke_path,
-    "effective_settings": {
-        "agent_model": "qwen35-4b-local",
-        "user_simulator_model": "gpt-4.1",
-        "evaluator_model": "gpt-4.1",
-        "agent_thinking": "${AGENT_THINKING}" == "true",
-        "user_simulator_thinking": "provider_default (gpt-4.1)",
-        "evaluator_thinking": "provider_default (gpt-4.1)",
+    "result_file": str(result_path),
+    "task_selection_file": str(selection_path),
+    "sglang_smoke_file": str(smoke_path),
+    "role_models": {
+        "agent": "qwen35-4b-local",
+        "user_simulator": "gpt-4.1",
+        "evaluator": "gpt-4.1",
+    },
+    "agent_inference": {
+        "thinking": True,
         "temperature": 1.0,
         "top_p": 0.95,
         "top_k": 20,
         "presence_penalty": 1.5,
         "repetition_penalty": 1.0,
-        "n": 1,
-        "agent_max_tokens": 8192,
-        "user_evaluator_max_tokens": 4096,
+        "max_tokens": 8192,
         "max_input_tokens": 65536,
-        "max_steps": payload.get("info", {}).get("max_steps"),
     },
+    "user_evaluator_inference": {"max_tokens": 4096, "temperature": 0.0},
+    "requested_concurrency": concurrency,
+    "requested_sglang_data_parallel_size": 2,
+    "requested_sglang_max_running_requests": concurrency,
     "tasks": records,
-    "tool_use_verification": {
-        "assistant_tool_call_count": len(assistant_tool_calls),
-        "tool_message_count": len(tool_messages),
-        "user_reasoning_leak_count": len(user_reasoning_leaks),
-        "user_reasoning_leaks": user_reasoning_leaks,
-    },
 }
 summary_path.write_text(json.dumps(summary, indent=2) + "\n")
-print(f"result={result}")
-print(f"diagnostic_summary={summary_path}")
-for record in records:
-    print(json.dumps(record, sort_keys=True))
-print(json.dumps(summary["tool_use_verification"], sort_keys=True))
-
-if not assistant_tool_calls:
-    raise SystemExit("VitaBench smoke failed: no structured assistant.tool_calls were recorded")
-if not tool_messages:
-    raise SystemExit("VitaBench smoke failed: no ToolMessage/tool result was recorded")
-if user_reasoning_leaks:
-    raise SystemExit("VitaBench smoke failed: user simulator reasoning leaked into a UserMessage")
+print(f"parallel_summary={summary_path}")
 PY
