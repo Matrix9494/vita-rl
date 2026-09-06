@@ -58,7 +58,7 @@ if [[ ! -f "$REF_LOAD/latest_checkpointed_iteration.txt" ]]; then
   (
     cd /root/Dressage/slime
     source scripts/models/qwen3.5-4B.sh
-    PYTHONPATH=/root/Megatron-LM python3 tools/convert_hf_to_torch_dist.py \
+    PYTHONPATH=/root/Megatron-LM:/root/Dressage/slime python3 tools/convert_hf_to_torch_dist.py \
       "${MODEL_ARGS[@]}" \
       --hf-checkpoint "$QWEN_MODEL" \
       --save "$REF_LOAD"
@@ -148,7 +148,7 @@ ray job submit --address=http://127.0.0.1:8265 --runtime-env-json="$RUNTIME_ENV_
 echo "[6/7] converting the saved Slime checkpoint back to Hugging Face format"
 native_checkpoint="$(find "$CKPT_SAVE" -type d -name 'iter_*' | sort | tail -n 1)"
 [[ -n "$native_checkpoint" ]] || { echo "No Slime checkpoint was written" >&2; exit 1; }
-PYTHONPATH=/root/Megatron-LM python3 tools/convert_torch_dist_to_hf.py \
+PYTHONPATH=/root/Megatron-LM:/root/Dressage/slime python3 tools/convert_torch_dist_to_hf.py \
   --input-dir "$native_checkpoint" --output-dir "$HF_OUTPUT" --origin-hf-dir "$QWEN_MODEL" \
   2>&1 | tee "$LOG_DIR/convert-torch-dist-to-hf.log"
 [[ -f "$HF_OUTPUT/config.json" ]] || { echo "Hugging Face checkpoint conversion did not produce config.json" >&2; exit 1; }
