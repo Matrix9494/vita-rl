@@ -137,7 +137,7 @@ ray job submit --address=http://127.0.0.1:8265 --runtime-env-json="$RUNTIME_ENV_
   --prompt-data "$PROMPT_DATA" --input-key prompt --label-key label --metadata-key metadata \
   --num-rollout 1 --rollout-batch-size 1 --n-samples-per-prompt 4 --rollout-max-response-len 1024 --rollout-temperature 1.0 --global-batch-size 4 \
   --advantage-estimator grpo --use-kl-loss --kl-loss-coef 0.001 --kl-loss-type low_var_kl --eps-clip 0.2 --eps-clip-high 0.28 --eps-clip-c 10.0 \
-  --optimizer adam --lr 1e-6 --lr-decay-style constant --weight-decay 0.01 --adam-beta1 0.9 --adam-beta2 0.98 --optimizer-cpu-offload --overlap-cpu-optimizer-d2h-h2d \
+  --optimizer adam --lr 1e-6 --lr-decay-style constant --weight-decay 0.01 --adam-beta1 0.9 --adam-beta2 0.98 --use-precision-aware-optimizer --optimizer-cpu-offload --overlap-cpu-optimizer-d2h-h2d \
   --tensor-model-parallel-size 1 --pipeline-model-parallel-size 1 --context-parallel-size 1 \
   --recompute-granularity full --recompute-method uniform --recompute-num-layers 1 \
   --use-dynamic-batch-size --max-tokens-per-gpu 4096 --log-probs-chunk-size 512 \
