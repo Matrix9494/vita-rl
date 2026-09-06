@@ -43,9 +43,16 @@ trap cleanup EXIT
 
 echo "[1/7] stopping the interactive SGLang server before model conversion"
 SGLANG_PID_FILE="$RUNTIME_DIR/sglang.pid"
+terminate_process_tree() {
+  local pid="$1" child
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    terminate_process_tree "$child"
+  done
+  kill "$pid" 2>/dev/null || true
+}
 if [[ -s "$SGLANG_PID_FILE" ]]; then
   old_sglang_pid="$(<"$SGLANG_PID_FILE")"
-  if kill -0 "$old_sglang_pid" 2>/dev/null; then kill "$old_sglang_pid"; fi
+  if kill -0 "$old_sglang_pid" 2>/dev/null; then terminate_process_tree "$old_sglang_pid"; fi
   rm -f "$SGLANG_PID_FILE"
 fi
 for _ in $(seq 1 60); do
