@@ -96,8 +96,12 @@ incrementally in `src/vita_rl/state.py`; it contains persistent constraints,
 typed entities, confirmed transactions, subgoals, open questions, and a
 derived termination state. It receives only user text, assistant tool calls,
 and tool responses--not task metadata or evaluator data. Full VitaBench
-history remains in the request, so this is the intended A/B experiment:
-standard is `pi(history)` and stateful is `pi(history, structured_state)`.
+the model request uses no full transcript.  Its window is the leading policy
+and structured state followed by exactly one latest observation (a raw user
+event, or a normalized tool-result event).  The complete VitaBench callback
+transcript remains local for auditing, but is never sent to the model.  The
+intended A/B comparison is therefore standard `pi(history)` versus stateful
+`pi(structured_state, latest_observation)`.
 
 For `vita_rl_stateful`, `vita_single.sbatch` writes one JSONL record for every
 observation/action transition to

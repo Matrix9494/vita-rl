@@ -134,7 +134,12 @@ def register_standard_harness() -> None:
 
 
 class StatefulHarnessState(LLMAgentState):
-    """VitaBench history plus the root-owned working state."""
+    """Local audit transcript plus the root-owned working state.
+
+    ``messages`` is retained for callback compatibility and post-run
+    inspection.  It is deliberately *not* the model context for this
+    harness; see :meth:`VitaRLStatefulAgent._prompt_observation`.
+    """
 
     working_state: AgentWorkingState
 
@@ -147,8 +152,10 @@ class VitaRLStatefulAgent(VitaRLStandardAgent):
 
     ``previous action -> new observation -> state update -> next action``.
 
-    The next action is conditioned on both the ordinary full history and the
-    explicit state view. No external VitaBench source is changed.
+    The next action is conditioned on an explicit state view and exactly one
+    latest observation.  Older observations and actions are represented only
+    by the structured state, never copied into the model context. No external
+    VitaBench source is changed.
     """
 
     _STATE_PROTOCOL = """\
@@ -193,6 +200,28 @@ all user constraints are satisfied by actual tool-confirmed state.
                 for call in (message.tool_calls or [])
             ],
         }
+
+    @classmethod
+    def _prompt_observation(cls, message: ValidAgentInputMessage) -> UserMessage:
+        """Normalize one incoming event into the sole non-system prompt item.
+
+        A raw ``ToolMessage`` needs the assistant tool call that precedes it
+        in an OpenAI transcript.  That would reintroduce history into a
+        context-window experiment, so tool outcomes are presented as one
+        self-contained user observation instead.  The original messages stay
+        in ``state.messages`` for VitaBench callback compatibility and audit,
+        but never reach ``generate`` in this harness.
+        """
+        observation = cls._observation(message)
+        if observation["kind"] == "user":
+            return UserMessage(role="user", content=observation["content"])
+        return UserMessage(
+            role="user",
+            content=(
+                "[LATEST TOOL OBSERVATION]\n"
+                + json.dumps(observation["results"], ensure_ascii=False, sort_keys=True)
+            ),
+        )
 
     @staticmethod
     def _save_new_traces(state: StatefulHarnessState, trace_start: int) -> None:
@@ -262,7 +291,10 @@ all user constraints are satisfied by actual tool-confirmed state.
         assistant_message = generate(
             model=self.llm,
             tools=self.tools,
-            messages=[state_message] + state.system_messages[1:] + state.messages,
+            # The state system message plus exactly this new observation is
+            # the entire model window.  ``state.messages`` is intentionally
+            # excluded: it is retained only as a local audit transcript.
+            messages=[state_message, self._prompt_observation(message)],
             enable_think=self.enable_think,
             **self.llm_args,
         )
