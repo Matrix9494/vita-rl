@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+private.pem
 
 # Python and tooling
 __pycache__/
@@ -11,14 +12,17 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+.venv-eval
 
 # Logs and generated experiment artifacts
 *.log
 outputs/
+logs/
 data/
 trajectories/
 checkpoints/
 models/
+external/vitabench/
 wandb/
 
 # Local-only Codex hook files

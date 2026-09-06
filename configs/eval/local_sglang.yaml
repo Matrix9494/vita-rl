@@ -1,0 +1,13 @@
+# Local OpenAI-compatible endpoint used by the LAIR single-task smoke run.
+default:
+  base_url: http://127.0.0.1:30000/v1/chat/completions
+  temperature: 0.0
+  max_input_tokens: 32768
+  headers:
+    Authorization: "Bearer EMPTY"
+    Content-Type: "application/json"
+
+models:
+  - name: qwen35-4b-local
+    max_tokens: 2048
+    max_input_tokens: 32768
