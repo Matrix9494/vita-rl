@@ -79,6 +79,23 @@ The LAIR launchers now use the same role split as the VESSL baseline:
 - user simulator: `gpt-4.1` through OpenRouter;
 - evaluator: `gpt-4.1` through OpenRouter.
 
+The launchers invoke the root-owned `vita_rl_standard` agent through
+`python -m vita_rl.vita_cli`, rather than selecting VitaBench's `llm_agent`
+directly. `src/vita_rl/harness.py` is a behaviorally equivalent copy of the
+current standard agent harness: it uses the same domain policy, system prompt,
+history, tools, and LLM call. This gives harness experiments a versioned home
+in vita-rl; future variants will subclass this baseline without modifying the
+external VitaBench checkout.
+
+`src/vita_rl/harness.py` also registers `vita_rl_stateful`, selected with
+`VITA_AGENT_IMPLEMENTATION=vita_rl_stateful`. It implements an explicit
+action/observation state machine: the prior action is recorded, the next user
+or tool observation advances `AgentWorkingState`, and the next action is
+generated from that state plus the normal trajectory. The state is maintained
+in `src/vita_rl/state.py` and includes recent observations/actions, latest
+user request/tool results, pending action, and tool-error count. The baseline
+remains the default; no external VitaBench source is modified for either mode.
+
 Each launcher starts `scripts/openrouter_proxy.py` on a short-lived localhost
 port. The job must receive `OPENROUTER_API_KEY`; the relay inherits it and the
 launcher immediately unsets it before starting VitaBench. The generated

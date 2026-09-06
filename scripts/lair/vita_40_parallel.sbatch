@@ -27,6 +27,7 @@ TASK_COUNT="${VITA_TASK_COUNT:-40}"
 SELECTION_SEED="${VITA_SELECTION_SEED:-20260906}"
 MAX_STEPS="${VITA_MAX_STEPS:-300}"
 CONCURRENCY="${VITA_MAX_CONCURRENCY:-20}"
+AGENT_IMPLEMENTATION="${VITA_AGENT_IMPLEMENTATION:-vita_rl_standard}"
 JOB_TAG="${SLURM_JOB_ID:-manual}"
 SGLANG_LOG="$REPO/logs/sglang-vita40-${JOB_TAG}.log"
 RESULT="$REPO/outputs/vita40-${JOB_TAG}.json"
@@ -213,10 +214,11 @@ python "$REPO/scripts/lair/qwen35_openai_smoke.py" \
     --model qwen35-4b-local \
     --output "$SGLANG_SMOKE"
 
-vita run \
+PYTHONPATH="$REPO/src${PYTHONPATH:+:$PYTHONPATH}" python -m vita_rl.vita_cli run \
     --domain "$DOMAIN" \
     --task-set-name "$TASK_SET" \
     --task-ids "${TASK_IDS[@]}" \
+    --agent "$AGENT_IMPLEMENTATION" \
     --agent-llm qwen35-4b-local \
     --user-llm gpt-4.1 \
     --evaluator-llm gpt-4.1 \

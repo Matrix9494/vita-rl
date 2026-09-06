@@ -23,6 +23,7 @@ BASE_URL="http://127.0.0.1:${PORT}/v1"
 TASK_IDS="${VITA_TASK_IDS:-${VITA_TASK_ID:-10711001}}"
 MAX_STEPS="${VITA_MAX_STEPS:-100}"
 AGENT_THINKING="${VITA_AGENT_THINKING:-false}"
+AGENT_IMPLEMENTATION="${VITA_AGENT_IMPLEMENTATION:-vita_rl_standard}"
 JOB_TAG="${SLURM_JOB_ID:-manual}"
 SGLANG_LOG="$REPO/logs/sglang-${JOB_TAG}.log"
 RESULT="$REPO/outputs/vita_single-${JOB_TAG}.json"
@@ -175,9 +176,10 @@ cd "$VITABENCH"
 # whitespace-separated sequence of VitaBench task identifiers.
 # shellcheck disable=SC2206
 TASK_ID_ARGS=( $TASK_IDS )
-vita run \
+PYTHONPATH="$REPO/src${PYTHONPATH:+:$PYTHONPATH}" python -m vita_rl.vita_cli run \
     --domain delivery \
     --task-ids "${TASK_ID_ARGS[@]}" \
+    --agent "$AGENT_IMPLEMENTATION" \
     --agent-llm "$AGENT_MODEL" \
     --user-llm gpt-4.1 \
     --evaluator-llm gpt-4.1 \
