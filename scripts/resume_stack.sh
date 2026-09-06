@@ -8,6 +8,11 @@ RUNTIME_DIR=/root/.vita_rl_runtime
 LOG_DIR=/root/logs/vita-rl
 SGLANG_PID_FILE="${RUNTIME_DIR}/sglang.pid"
 SGLANG_LOG="${LOG_DIR}/sglang.log"
+# The 4B hybrid model's default server allocation is overly aggressive on a
+# single H100 and has caused its detokenizer subprocess to be killed during
+# CUDA-graph capture. Keep inference headroom by default; callers that need a
+# larger KV cache can explicitly override this.
+SGLANG_MEM_FRACTION_STATIC="${SGLANG_MEM_FRACTION_STATIC:-0.32}"
 
 mkdir -p "$RUNTIME_DIR" "$LOG_DIR"
 echo "=== vita-rl resume ==="
@@ -53,6 +58,7 @@ else
         --model-path "$QWEN_MODEL" \
         --host 127.0.0.1 \
         --port 30000 \
+        --mem-fraction-static "$SGLANG_MEM_FRACTION_STATIC" \
         >"$SGLANG_LOG" 2>&1 &
     echo $! > "$SGLANG_PID_FILE"
 
