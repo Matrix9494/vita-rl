@@ -25,7 +25,7 @@ ENVIRONMENT_HARNESS="${ENVIRONMENT_HARNESS:-vita_rl_standard}"
 if [[ "$ENVIRONMENT" == "vitabench" ]]; then
   ENVIRONMENT_TASK_ID="${ENVIRONMENT_TASK_ID:-10711001}"
 else
-  ENVIRONMENT_TASK_ID="${ENVIRONMENT_TASK_ID:-buy_coffee}"
+  ENVIRONMENT_TASK_ID="${ENVIRONMENT_TASK_ID:-delivery_revision}"
 fi
 
 mkdir -p "$RUN_ROOT" "$LOG_DIR"

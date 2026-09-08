@@ -38,6 +38,7 @@ class EnvironmentEpisodeResult:
     num_agent_turns: int
     num_tool_calls: int
     num_tool_errors: int
+    user_events: list[dict[str, Any]]
     final_assistant_response: str
     evaluation: dict[str, Any]
     messages: list[dict[str, Any]]
@@ -149,12 +150,18 @@ def run_tool_environment_episode(
     num_tool_errors = 0
     final_response = ""
     termination_reason = "max_steps"
+    pending_user_events: list[dict[str, Any]] = []
 
     for agent_turn in range(1, max_steps + 1):
         assistant, state = agent.generate_next_message(incoming, state)
         final_response = assistant.content or ""
         calls = assistant.tool_calls or []
+        pending_user_events.extend(env.next_user_event(agent_turn=agent_turn))
         if not calls:
+            if pending_user_events:
+                event = pending_user_events.pop(0)
+                incoming = protocol.UserMessage(role="user", content=event["message"])
+                continue
             termination_reason = "agent_stop" if agent.is_stop(assistant) else "assistant_final"
             break
         tool_messages = []
@@ -162,6 +169,9 @@ def run_tool_environment_episode(
             num_tool_calls += 1
             result = env.call_tool(call.name, call.arguments)
             num_tool_errors += int(not result.ok)
+            pending_user_events.extend(
+                env.next_user_event(tool_name=call.name, tool_success=result.ok)
+            )
             tool_messages.append(
                 protocol.ToolMessage(
                     role="tool",
@@ -188,6 +198,7 @@ def run_tool_environment_episode(
         num_agent_turns=len([message for message in state.messages if isinstance(message, protocol.AssistantMessage)]),
         num_tool_calls=num_tool_calls,
         num_tool_errors=num_tool_errors,
+        user_events=list(evaluation.state["interaction"]["user_events"]),
         final_assistant_response=final_response,
         evaluation=evaluation.to_dict(),
         messages=messages,
@@ -305,7 +316,7 @@ def _openai_message(message: Any) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a deterministic tool environment through a vita-rl harness.")
     parser.add_argument("--environment", default="vita-mini", choices=tool_environment_registry.names())
-    parser.add_argument("--task-id", default="buy_coffee")
+    parser.add_argument("--task-id", default="delivery_revision")
     parser.add_argument("--harness", default="vita_rl_standard", choices=(
         "vita_rl_standard", "vita_rl_stateful", "vita_rl_summary",
         "vita_rl_recent_turns", "vita_rl_state_delta",

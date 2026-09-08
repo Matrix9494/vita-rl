@@ -200,6 +200,7 @@ def run_environment_episode(request: EpisodeRequest) -> EpisodeResponse:
             "environment": result.environment,
             "num_tool_calls": result.num_tool_calls,
             "num_tool_errors": result.num_tool_errors,
+            "user_events": result.user_events,
             "evaluation": result.evaluation,
             "messages": result.messages,
         },

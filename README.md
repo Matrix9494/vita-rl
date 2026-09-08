@@ -96,7 +96,7 @@ For Dressage/Vessl, prompt metadata uses the same neutral fields:
 ```json
 {
   "environment": "vita-mini",
-  "task_id": "buy_coffee",
+  "task_id": "delivery_revision",
   "agent_model": "proxy-model",
   "environment_args": {"harness": "vita_rl_standard"}
 }

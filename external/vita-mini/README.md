@@ -1,99 +1,89 @@
 # vita-mini
 
-`vita-mini` is a small, self-contained environment for training and evaluating
-tool-using agents.  It deliberately does not import VitaBench, call an LLM for
-user simulation, or use an LLM judge.  Every state transition and score is
-deterministic and inspectable.
+`vita-mini` is a procedural, deterministic delivery environment for research
+on tool-use RL, long-horizon memory, and state abstraction. It does not import
+VitaBench and never uses GPT or any other LLM for its user or evaluation.
 
-The first domain is a compact storefront.  An agent can inspect an account and
-catalogue, manage a cart, provide a delivery address, submit an order, and
-inspect or cancel its orders.
+## Agent contract
 
-## Install and run
+An episode follows the normal OpenAI tool-use transcript:
 
-```bash
-cd external/vita-mini
-python3 -m pip install -e .
-python3 -m unittest discover -s tests -v
+```text
+system + user message → assistant tool call → tool result
+→ optional scripted user event → … → final answer → exact evaluation
 ```
 
-```python
-from vita_mini import MiniEnvironment
+The agent sees only user messages, tool schemas, and tool results. The
+database, latent task constraints, unrevealed preferences, revision history,
+and evaluator state remain hidden.
 
-env = MiniEnvironment()
-observation = env.reset("buy_coffee")
+The delivery API exposed through `env.openai_tools()` is:
 
-# Supply this to an OpenAI-compatible model client's `tools=` parameter.
-tools = env.openai_tools()
+- `search_stores`, `search_products`, `get_store`, `get_product`
+- `create_order`, `modify_order`, `cancel_order`, `pay_order`, `get_order`
 
-result = env.call_tool("search_catalog", {"query": "coffee"})
-print(result.to_dict())
-```
+`env.call_tool(name, arguments)` returns a JSON-safe `ToolResult`; invalid
+calls are structured agent-visible errors rather than Python tracebacks.
 
-## Agent-facing tools
+## Tasks, revisions, and evaluation
 
-| Tool | Purpose |
-| --- | --- |
-| `get_account` | Read the active customer's account. |
-| `update_account_profile` | Change the customer's display name or email. |
-| `search_catalog` | Search the fixed product catalogue. |
-| `get_product` | Read one product and its remaining inventory. |
-| `get_cart` | Read the current cart and subtotal. |
-| `add_to_cart` | Add an in-stock product to the cart. |
-| `remove_from_cart` | Remove a line from the cart. |
-| `set_delivery_address` | Set the address used by checkout. |
-| `checkout` | Convert a non-empty cart into a submitted order. |
-| `list_orders` | List this customer's orders. |
-| `get_order` | Read a specific order. |
-| `cancel_order` | Cancel a submitted order and restore inventory. |
-| `get_current_time` | Read the environment's fixed logical time. |
+`delivery_revision` starts with a request for cold brew at home. After a
+successful product search, the scripted user reveals that caffeine and spice
+are unacceptable. After order creation, they revise the address to the office
+and request payment. Succeeding requires retaining and applying all final
+constraints via `modify_order` and `pay_order`.
 
-`MiniEnvironment.openai_tools()` returns these tools in the Chat Completions
-function-tool format.  `call_tool(name, arguments)` is the single execution
-boundary: it validates arguments, catches expected tool errors, and returns a
-JSON-safe `ToolResult` rather than leaking Python exceptions to an agent.
+`env.next_user_event(agent_turn=..., tool_name=..., tool_success=...)` reveals
+condition-triggered scripted messages exactly once. Event triggers include
+agent turns, tools, successful tools, and order creation. The shared runner
+calls this automatically; direct tests can call it themselves.
 
-## Episodes, scripted users, and evaluation
+`env.evaluate()` is exact and deterministic. It reports strict success,
+binary terminal reward, constraint score, tool validity, every constraint
+result, and an executor-only final-state snapshot. Strict success requires one
+non-cancelled final order to satisfy all active objective constraints.
 
-`reset(task_id)` loads a built-in `MiniTask`, resets all mutable state, and
-returns an observation containing the deterministic user request.  The
-environment currently includes `buy_coffee` and `cancel_order` tasks.  A
-task's user text is static data, not model-generated.
+## Procedural generation
 
-Use `env.evaluate()` after the episode.  The result checks declarative goal
-conditions such as product quantity, submitted order status, and cancellation.
-It returns a reward in `[0.0, 1.0]`, failed conditions, and an exact state
-snapshot.  This makes the evaluator appropriate for RL reward computation and
-unit testing.
+`TaskGenerator(seed).generate(difficulty=DifficultyConfig(...))` creates a
+reproducible delivery database, composite constraints, distractor stores and
+products, a disclosure/revision script, and an oracle action plan. The
+configuration records the requested number of constraints, objectives,
+revisions, distractors, tools, and horizon/retention targets. Use
+`vita_mini.oracle.verify_oracle_solution(task)` before accepting generated
+tasks in a dataset pipeline.
 
-The public `snapshot()` method is intended for reproducibility/debugging.  It
-is not included in `openai_tools()`, so agents can interact only through the
-documented business APIs.
+## Running through the shared harnesses
 
-## Running Qwen through vita-rl harnesses
-
-From the repository root, use the environment-neutral rollout runner. It uses
-the root-owned harness classes (`vita_rl_standard`, `vita_rl_stateful`,
-`vita_rl_summary`, `vita_rl_recent_turns`, and `vita_rl_state_delta`) but owns
-the episode loop locally.  There is no VitaBench import, GPT user, or LLM
-evaluator in this path.
+There is no mini-specific runner. From the repository root, the generic
+environment runner uses the existing standard, stateful, summary,
+recent-turns, and state-delta harnesses:
 
 ```bash
 PYTHONPATH=src:external/vita-mini/src \
 VITA_RL_PROTOCOL=mini \
 .venv-eval/bin/python -m vita_rl.environment_runner \
   --environment vita-mini \
-  --task-id buy_coffee \
+  --task-id delivery_revision \
   --harness vita_rl_standard \
   --model /u/dz13/vita-rl/models/Qwen3.5-4B
 ```
 
-The runner expects an OpenAI-compatible endpoint at
-`http://127.0.0.1:30000/v1/chat/completions`; override it with
-`--base-url` or `ENVIRONMENT_BASE_URL`. It sends Qwen exactly the harness's
-native transcript and the tool schemas, executes each returned tool call via
-`MiniEnvironment`, then gives Qwen role-`tool` results. At termination it
-calls `env.evaluate()` for the deterministic reward. Future custom
-environments implement the same contract and register once with
-`vita_rl.environments.tool_environment_registry`; they use this exact runner,
-not an environment-specific copy.
+The runner sends native OpenAI-style messages to the configured Qwen/SGLang
+endpoint, stores messages, tool calls/results, scripted user events,
+termination reason, final state, reward, and constraint-level evaluation.
+For Dressage/Vessl, select the same environment in prompt metadata:
+
+```json
+{
+  "environment": "vita-mini",
+  "task_id": "delivery_revision",
+  "environment_args": {"harness": "vita_rl_stateful"}
+}
+```
+
+## Tests
+
+```bash
+PYTHONPATH=external/vita-mini/src python3 -m unittest discover -s external/vita-mini/tests -v
+```

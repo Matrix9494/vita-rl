@@ -7,7 +7,7 @@ def test_request_schema_round_trip():
     assert request.dressage_proxy_url == "http://proxy/"
     assert request.to_dict()["sampling_params"]["temperature"] == 0.2
 def test_environment_selection_is_validated():
-    data=payload(); data["environment"]="vita-mini"; data["task_id"]="buy_coffee"
+    data=payload(); data["environment"]="vita-mini"; data["task_id"]="delivery_revision"
     request=EpisodeRequest.from_dict(data)
     assert request.environment == "vita-mini"
     assert request.environment_args == {"domain":"delivery", "language":"chinese"}

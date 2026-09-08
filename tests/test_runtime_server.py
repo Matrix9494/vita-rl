@@ -42,12 +42,19 @@ class ScriptedDressageProxy:
     def __call__(self, *, tools, **_kwargs):
         self.turn_count += 1
         calls = [
-            ("add_to_cart", {"product_id": "cold-brew", "quantity": 2}),
-            ("set_delivery_address", {"address": "1 Mini Way"}),
-            ("checkout", {}),
+            ("search_products", {"query": "coffee"}),
+            None,
+            ("search_products", {"query": "herbal tea"}),
+            ("create_order", {"store_id": "store-target", "product_id": "product-herbal-tea", "quantity": 2, "address": "home", "delivery_time": "2026-01-01 12:00:00"}),
+            None,
+            ("modify_order", {"order_id": "mini-order-0001", "address": "office"}),
+            ("pay_order", {"order_id": "mini-order-0001"}),
         ]
         if self.turn_count <= len(calls):
-            name, arguments = calls[self.turn_count - 1]
+            action = calls[self.turn_count - 1]
+            if action is None:
+                return harness_protocol.AssistantMessage(role="assistant", content="Waiting for more details.")
+            name, arguments = action
             return harness_protocol.AssistantMessage(
                 role="assistant",
                 tool_calls=[harness_protocol.ToolCall(
@@ -59,7 +66,7 @@ class ScriptedDressageProxy:
 runtime_server.DressageProxyGenerator = ScriptedDressageProxy
 request = runtime_server.EpisodeRequest.from_dict({
     "environment": "vita-mini",
-    "task_id": "buy_coffee",
+    "task_id": "delivery_revision",
     "session_id": "session",
     "instance_id": "instance",
     "agent_model": "proxy-model",
@@ -68,7 +75,7 @@ request = runtime_server.EpisodeRequest.from_dict({
 })
 response = runtime_server.run_environment_episode(request)
 assert response.completed and response.reward == 1.0
-assert response.proxy_turns == 4
+assert response.proxy_turns == 8
 assert response.simulation["environment"] == "vita-mini"
 assert "vita" not in sys.modules
 '''

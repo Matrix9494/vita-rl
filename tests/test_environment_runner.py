@@ -31,12 +31,19 @@ class ScriptedGenerator:
             )
         self.step += 1
         calls = [
-            ("add_to_cart", {"product_id": "cold-brew", "quantity": 2}),
-            ("set_delivery_address", {"address": "1 Mini Way"}),
-            ("checkout", {}),
+            ("search_products", {"query": "coffee"}),
+            None,
+            ("search_products", {"query": "herbal tea"}),
+            ("create_order", {"store_id": "store-target", "product_id": "product-herbal-tea", "quantity": 2, "address": "home", "delivery_time": "2026-01-01 12:00:00"}),
+            None,
+            ("modify_order", {"order_id": "mini-order-0001", "address": "office"}),
+            ("pay_order", {"order_id": "mini-order-0001"}),
         ]
         if self.step <= len(calls):
-            name, arguments = calls[self.step - 1]
+            action = calls[self.step - 1]
+            if action is None:
+                return harness_protocol.AssistantMessage(role="assistant", content="I will wait for the next detail.")
+            name, arguments = action
             return harness_protocol.AssistantMessage(
                 role="assistant",
                 tool_calls=[harness_protocol.ToolCall(
@@ -53,7 +60,7 @@ for name in (
 ):
     result = run_tool_environment_episode(
         environment_name="vita-mini",
-        task_id="buy_coffee",
+        task_id="delivery_revision",
         harness_name=name,
         model="scripted-qwen",
         generate_fn=ScriptedGenerator(),
@@ -61,7 +68,8 @@ for name in (
     )
     assert result.success, (name, result)
     assert result.reward == 1.0, (name, result)
-    assert result.num_tool_calls == 3, (name, result)
+    assert result.num_tool_calls == 5, (name, result)
+    assert len(result.user_events) == 3, (name, result.user_events)
 
 assert "vita" not in sys.modules
 '''

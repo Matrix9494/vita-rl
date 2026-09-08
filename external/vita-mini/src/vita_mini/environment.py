@@ -1,140 +1,207 @@
-"""The standalone deterministic environment and rule-based evaluator."""
+"""Deterministic, hidden-state delivery environment with scripted users."""
 
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
 from typing import Any
 
-from .tasks import get_task, list_tasks
-from .tools import StorefrontTools, ToolError
-from .types import CartLine, EvaluationResult, Order, Product, ToolResult
-
-
-def _initial_state() -> dict[str, Any]:
-    catalog = {
-        "cold-brew": Product("cold-brew", "Cold Brew Coffee", "drinks", 425, 12, ("coffee", "cold", "caffeine")),
-        "green-tea": Product("green-tea", "Green Tea", "drinks", 300, 10, ("tea", "hot", "caffeine")),
-        # The one seeded submitted order already reserves one bagel, so this
-        # is the seven-unit remaining inventory visible to an agent.
-        "bagel": Product("bagel", "Plain Bagel", "bakery", 250, 7, ("bread", "breakfast")),
-    }
-    return {
-        "account": {"user_id": "mini-user-001", "display_name": "Mini User", "email": "mini@example.test"},
-        "catalog": catalog,
-        "cart": [],
-        "delivery_address": None,
-        "orders": {
-            "mini-order-0001": Order(
-                order_id="mini-order-0001", user_id="mini-user-001",
-                lines=[CartLine("bagel", 1)], total_cents=250,
-                delivery_address="1 Mini Way", status="submitted", created_at="2026-01-01T09:00:00Z",
-            )
-        },
-        "next_order_number": 2,
-        "logical_time": "2026-01-01T09:00:00Z",
-    }
+from .generator import built_in_tasks
+from .tasks import Constraint, MiniTask, UserEvent
+from .tools import DeliveryTools, ToolError
+from .types import EnvironmentState, EvaluationResult, InteractionState, ToolResult, UserState
 
 
 class MiniEnvironment:
-    """A stateful storefront with a narrow, LLM-safe tool boundary."""
+    """A research-oriented delivery environment; it never invokes an LLM."""
 
-    def __init__(self) -> None:
-        self._state = _initial_state()
-        self._tools = StorefrontTools(self._state)
-        self._task_id: str | None = None
+    def __init__(self, tasks: dict[str, MiniTask] | None = None) -> None:
+        self._tasks = tasks or built_in_tasks()
+        self._task: MiniTask | None = None
+        self._state: EnvironmentState | None = None
+        self._tools: DeliveryTools | None = None
 
     def reset(self, task_id: str | None = None) -> dict[str, Any]:
-        """Reset all mutable state and return the static initial observation."""
-        self._state = _initial_state()
-        self._tools = StorefrontTools(self._state)
-        self._task_id = task_id
-        task = get_task(task_id) if task_id is not None else None
+        if task_id is None:
+            task_id = sorted(self._tasks)[0]
+        try:
+            self._task = self._tasks[task_id]
+        except KeyError as exc:
+            raise ValueError(f"Unknown task {task_id!r}; available: {', '.join(sorted(self._tasks))}") from exc
+        database = deepcopy(self._task.initial_state)
+        latent = {constraint.constraint_id: constraint.expected for constraint in self._task.latent_constraints}
+        self._state = EnvironmentState(
+            database=database,
+            user=UserState(user_id="mini-user-001", latent_constraints=latent),
+            task_id=self._task.task_id,
+            interaction=InteractionState(),
+        )
+        self._tools = DeliveryTools(database, self._state.user.user_id)
+        initial = self._consume_event(self._initial_event())
         return {
-            "task_id": task.task_id if task else None,
-            "user_message": task.user_message if task else None,
-            "account": self._tools.get_account(),
-            "logical_time": self._state["logical_time"],
+            "task_id": self._task.task_id,
+            "user_message": initial["message"],
+            "logical_time": database.current_time,
         }
-
-    def openai_tools(self) -> list[dict[str, Any]]:
-        """Return the complete agent-facing tool set in OpenAI function format."""
-        return deepcopy(self._tools.schemas())
 
     @staticmethod
     def agent_policy() -> str:
-        """Return the system policy supplied to every supported harness.
-
-        ``{time}`` is substituted by the harness, matching the existing
-        VitaBench harness contract without depending on VitaBench itself.
-        """
-        return """You are a storefront assistant in a deterministic tool-use environment.
-Complete the user's request by calling the available tools. Treat tool results
-as the source of truth; do not claim that an order was created or cancelled
-until the corresponding tool confirms it. Use a concise final response after
-the requested state transition succeeds.
+        return """You are a delivery assistant in a deterministic tool-use environment.
+Complete the user's currently stated requests using tools. Information can be
+revealed or revised later, so treat newer user instructions as superseding
+earlier preferences. Tool-confirmed data is authoritative. Before a final
+answer, inspect and pay or cancel orders only when the user has requested it.
 
 Current logical time: {time}"""
 
-    def tool_names(self) -> list[str]:
-        return self._tools.names
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return deepcopy(self._require_tools().schemas())
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> ToolResult:
-        """Invoke one agent tool without exposing implementation exceptions."""
+        state = self._require_state()
+        state.interaction.tool_calls += 1
         try:
-            return ToolResult(ok=True, result=self._tools.invoke(name, arguments or {}))
+            result = self._require_tools().invoke(name, arguments or {})
+            return ToolResult(ok=True, result=result)
         except ToolError as exc:
+            state.interaction.invalid_tool_calls += 1
             return ToolResult(ok=False, error=str(exc))
 
+    def next_user_event(
+        self, *, agent_turn: int | None = None, tool_name: str | None = None, tool_success: bool | None = None
+    ) -> list[dict[str, Any]]:
+        """Reveal every currently triggered user event, exactly once.
+
+        The runner calls this after agent turns and tool calls. The returned
+        messages are agent-visible; latent constraints and the rest of state
+        remain private to evaluation.
+        """
+        state = self._require_state()
+        if agent_turn is not None:
+            state.interaction.agent_turns = max(state.interaction.agent_turns, agent_turn)
+        events = []
+        for event in self._require_task().user_script:
+            if event.trigger == "initial" or event.event_id in state.interaction.fired_event_ids:
+                continue
+            if self._event_matches(event, state.interaction.agent_turns, tool_name, tool_success):
+                events.append(self._consume_event(event))
+        return events
+
     def evaluate(self) -> EvaluationResult:
-        """Evaluate the selected static task using only explicit state conditions."""
-        if self._task_id is None:
-            raise ValueError("reset(task_id) must be called before evaluate()")
-        task = get_task(self._task_id)
-        failures = [self._describe_goal(goal) for goal in task.goals if not self._goal_met(goal)]
+        state = self._require_state()
+        task = self._require_task()
+        checks = {constraint.constraint_id: self._constraint_met(constraint) for constraint in task.latent_constraints}
+        required = [constraint.constraint_id for constraint in task.latent_constraints if constraint.required]
+        active_required = [constraint for constraint in task.latent_constraints if constraint.required and constraint.order_selector == "active"]
+        active_orders = [order for order in state.database.orders.values() if order.status != "cancelled"]
+        one_complete_active_order = any(
+            all(self._order_matches(order, constraint) for constraint in active_required)
+            for order in active_orders
+        )
+        success = one_complete_active_order and all(checks[constraint_id] for constraint_id in required)
+        constraint_score = sum(checks.values()) / len(checks) if checks else 1.0
+        validity = 1.0 - state.interaction.invalid_tool_calls / max(1, state.interaction.tool_calls)
         return EvaluationResult(
-            reward=1.0 if not failures else 0.0,
-            success=not failures,
-            failed_conditions=failures,
+            reward=1.0 if success else 0.0,
+            success=success,
+            constraint_score=constraint_score,
+            tool_validity=validity,
+            constraints=checks,
+            failed_conditions=[constraint_id for constraint_id, met in checks.items() if not met],
             state=self.snapshot(),
         )
 
     def snapshot(self) -> dict[str, Any]:
-        """Return a deep-copied, JSON-safe state for tests and reproducibility."""
+        """Executor-only complete state snapshot for reproducibility and reward audit."""
+        state = self._require_state()
         return {
-            "account": deepcopy(self._state["account"]),
-            "catalog": [self._tools.get_product(product_id) for product_id in sorted(self._state["catalog"])],
-            "cart": self._tools.get_cart(),
-            "orders": self._tools.list_orders(),
-            "logical_time": self._state["logical_time"],
+            "database": {
+                "stores": {key: _json(value) for key, value in state.database.stores.items()},
+                "products": {key: _json(value) for key, value in state.database.products.items()},
+                "orders": {key: _json(value) for key, value in state.database.orders.items()},
+                "locations": dict(state.database.locations),
+                "current_time": state.database.current_time,
+            },
+            "user": _json(state.user),
+            "interaction": _json(state.interaction),
         }
 
     @staticmethod
-    def tasks() -> list[dict[str, str]]:
-        """List static task ids and their user messages without model generation."""
-        return [{"task_id": task.task_id, "user_message": task.user_message} for task in list_tasks()]
+    def tasks() -> list[dict[str, Any]]:
+        return [{"task_id": task_id} for task_id in sorted(built_in_tasks())]
 
-    def _goal_met(self, goal: dict[str, Any]) -> bool:
-        goal_type = goal["type"]
-        if goal_type == "submitted_product_quantity":
-            return any(
-                order.status == "submitted"
-                and sum(line.quantity for line in order.lines if line.product_id == goal["product_id"]) == goal["quantity"]
-                for order in self._state["orders"].values()
-            )
-        if goal_type == "order_address":
-            return any(order.status == "submitted" and order.delivery_address == goal["address"] for order in self._state["orders"].values())
-        if goal_type == "order_status":
-            order = self._state["orders"].get(goal["order_id"])
-            return order is not None and order.status == goal["status"]
-        raise ValueError(f"Unsupported goal type {goal_type!r}")
+    def _constraint_met(self, constraint: Constraint) -> bool:
+        state = self._require_state()
+        orders = list(state.database.orders.values())
+        if constraint.order_selector == "active":
+            orders = [order for order in orders if order.status != "cancelled"]
+        else:
+            orders = [order for order in orders if order.status == "cancelled"]
+        if not orders:
+            return False
+        return any(self._order_matches(order, constraint) for order in orders)
 
-    @staticmethod
-    def _describe_goal(goal: dict[str, Any]) -> str:
-        goal_type = goal["type"]
-        if goal_type == "submitted_product_quantity":
-            return f"a submitted order must contain {goal['quantity']} x {goal['product_id']}"
-        if goal_type == "order_address":
-            return f"a submitted order must use address {goal['address']!r}"
-        if goal_type == "order_status":
-            return f"order {goal['order_id']} must have status {goal['status']!r}"
-        return f"unsupported goal: {goal}"
+    def _order_matches(self, order: Any, constraint: Constraint) -> bool:
+        product = self._require_state().database.products[order.product_id]
+        if constraint.field == "product_id": return order.product_id == constraint.expected
+        if constraint.field == "store_id": return order.store_id == constraint.expected
+        if constraint.field == "quantity": return order.quantity == constraint.expected
+        if constraint.field == "address": return order.address == constraint.expected
+        if constraint.field == "paid": return (order.status == "paid") == bool(constraint.expected)
+        if constraint.field == "cancelled": return (order.status == "cancelled") == bool(constraint.expected)
+        if constraint.field == "max_price_cents": return order.total_cents <= int(constraint.expected)
+        if constraint.field == "tag_absent": return str(constraint.expected) not in product.tags
+        if constraint.field == "tag_present": return str(constraint.expected) in product.tags
+        raise ValueError(f"Unsupported constraint field {constraint.field!r}")
+
+    def _event_matches(self, event: UserEvent, agent_turn: int, tool_name: str | None, tool_success: bool | None) -> bool:
+        if event.trigger == "after_agent_turn":
+            return agent_turn >= (event.after_turn or 1)
+        if event.trigger == "after_tool":
+            return event.tool_name is None or event.tool_name == tool_name
+        if event.trigger == "after_successful_tool":
+            return bool(tool_success) and (event.tool_name is None or event.tool_name == tool_name)
+        if event.trigger == "after_order_created":
+            return bool(tool_success) and tool_name == "create_order"
+        return False
+
+    def _consume_event(self, event: UserEvent) -> dict[str, Any]:
+        state = self._require_state()
+        state.interaction.fired_event_ids.add(event.event_id)
+        if event.revision_of:
+            state.user.revision_history.append({"event_id": event.event_id, "revision_of": event.revision_of, "updates": dict(event.updates)})
+        state.user.revealed_constraints.update(event.updates)
+        state.user.current_preferences.update(event.updates)
+        record = {"event_id": event.event_id, "message": event.message, "updates": dict(event.updates), "revision_of": event.revision_of}
+        state.interaction.user_events.append(record)
+        return record
+
+    def _initial_event(self) -> UserEvent:
+        return next(event for event in self._require_task().user_script if event.trigger == "initial")
+
+    def _require_state(self) -> EnvironmentState:
+        if self._state is None:
+            raise RuntimeError("Call reset(task_id) before using vita-mini")
+        return self._state
+
+    def _require_tools(self) -> DeliveryTools:
+        self._require_state()
+        assert self._tools is not None
+        return self._tools
+
+    def _require_task(self) -> MiniTask:
+        if self._task is None:
+            raise RuntimeError("Call reset(task_id) before using vita-mini")
+        return self._task
+
+
+def _json(value: Any) -> Any:
+    if hasattr(value, "__dataclass_fields__"):
+        return {key: _json(item) for key, item in asdict(value).items()}
+    if isinstance(value, set):
+        return sorted(value)
+    if isinstance(value, dict):
+        return {key: _json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json(item) for item in value]
+    return value

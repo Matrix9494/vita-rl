@@ -1,39 +1,51 @@
-"""Built-in deterministic tasks.  Add data here instead of LLM user prompts."""
+"""Declarative mini tasks, constraints, and scripted user disclosures."""
 
 from __future__ import annotations
 
-from .types import MiniTask
+from dataclasses import asdict, dataclass, field
+from typing import Any, Literal
+
+from .types import DatabaseState
 
 
-TASKS: dict[str, MiniTask] = {
-    "buy_coffee": MiniTask(
-        task_id="buy_coffee",
-        user_message="Please order two cold brew coffees for delivery to 1 Mini Way.",
-        goals=(
-            {"type": "submitted_product_quantity", "product_id": "cold-brew", "quantity": 2},
-            {"type": "order_address", "address": "1 Mini Way"},
-        ),
-    ),
-    "cancel_order": MiniTask(
-        task_id="cancel_order",
-        user_message=(
-            "I changed my mind. Please cancel my existing order mini-order-0001."
-        ),
-        goals=(
-            {"type": "order_status", "order_id": "mini-order-0001", "status": "cancelled"},
-        ),
-    ),
-}
+TriggerKind = Literal["initial", "after_agent_turn", "after_tool", "after_successful_tool", "after_order_created"]
 
 
-def get_task(task_id: str) -> MiniTask:
-    try:
-        return TASKS[task_id]
-    except KeyError as exc:
-        available = ", ".join(sorted(TASKS))
-        raise ValueError(f"Unknown task {task_id!r}. Available tasks: {available}") from exc
+@dataclass(frozen=True)
+class UserEvent:
+    event_id: str
+    trigger: TriggerKind
+    message: str
+    after_turn: int | None = None
+    tool_name: str | None = None
+    revision_of: str | None = None
+    updates: dict[str, Any] = field(default_factory=dict)
 
 
-def list_tasks() -> list[MiniTask]:
-    return [TASKS[task_id] for task_id in sorted(TASKS)]
+@dataclass(frozen=True)
+class Constraint:
+    """An executable final-state predicate encoded as data, never prose."""
 
+    constraint_id: str
+    field: Literal["product_id", "store_id", "quantity", "address", "paid", "cancelled", "max_price_cents", "tag_absent", "tag_present"]
+    expected: Any
+    order_selector: Literal["active", "cancelled"] = "active"
+    required: bool = True
+
+
+@dataclass(frozen=True)
+class MiniTask:
+    task_id: str
+    initial_state: DatabaseState
+    objectives: tuple[str, ...]
+    latent_constraints: tuple[Constraint, ...]
+    user_script: tuple[UserEvent, ...]
+    difficulty: dict[str, int]
+    oracle_solution: tuple[dict[str, Any], ...]
+
+    @property
+    def initial_message(self) -> str:
+        return next(event.message for event in self.user_script if event.trigger == "initial")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
