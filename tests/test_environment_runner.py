@@ -14,7 +14,7 @@ def test_mini_runs_every_harness_without_importing_vitabench():
     script = r'''
 import sys
 from vita_rl import harness_protocol
-from vita_rl.mini_runner import run_mini_episode
+from vita_rl.environment_runner import run_tool_environment_episode
 from vita_rl.state_delta import NoOpStateUpdater
 
 assert harness_protocol.USING_VITABENCH is False
@@ -51,7 +51,8 @@ for name in (
     "vita_rl_standard", "vita_rl_stateful", "vita_rl_summary",
     "vita_rl_recent_turns", "vita_rl_state_delta",
 ):
-    result = run_mini_episode(
+    result = run_tool_environment_episode(
+        environment_name="vita-mini",
         task_id="buy_coffee",
         harness_name=name,
         model="scripted-qwen",

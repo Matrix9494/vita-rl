@@ -1,8 +1,8 @@
-"""Run deterministic :mod:`vita_mini` tasks through vita-rl harnesses.
+"""Run registered deterministic tool environments through vita-rl harnesses.
 
 This module intentionally owns the episode loop that VitaBench normally
 provides: it gives the initial static user message to a harness, executes its
-tool calls against ``MiniEnvironment``, and feeds structured tool messages
+tool calls against a selected environment, and feeds structured tool messages
 back.  It never creates a GPT user or invokes an LLM evaluator.
 """
 
@@ -18,7 +18,7 @@ from typing import Any, Callable, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from vita_mini import MiniEnvironment
+from vita_rl.environments import tool_environment_registry
 
 
 class Generator(Protocol):
@@ -26,9 +26,10 @@ class Generator(Protocol):
 
 
 @dataclass(frozen=True)
-class MiniEpisodeResult:
-    """Audit record for one fully deterministic environment episode."""
+class EnvironmentEpisodeResult:
+    """Audit record for one fully deterministic tool-environment episode."""
 
+    environment: str
     task_id: str
     harness: str
     reward: float
@@ -45,8 +46,8 @@ class MiniEpisodeResult:
         return asdict(self)
 
 
-class MiniSchemaTool:
-    """Schema-only bridge from ``MiniEnvironment`` to a harness tool list."""
+class SchemaTool:
+    """Schema-only bridge from an environment to a harness tool list."""
 
     def __init__(self, schema: dict[str, Any]) -> None:
         self._schema = schema
@@ -61,7 +62,7 @@ def _load_standalone_protocol() -> tuple[Any, Any]:
     """Load the existing harness module under its VitaBench-free protocol.
 
     Selection happens before importing either protocol or harness, which makes
-    ``python -m vita_rl.mini_runner`` safe in an environment where VitaBench
+    ``python -m vita_rl.environment_runner`` safe in an environment where VitaBench
     happens to be installed.  A process that previously imported the
     VitaBench-backed harness remains usable, but is not considered a
     standalone mini run.
@@ -73,7 +74,7 @@ def _load_standalone_protocol() -> tuple[Any, Any]:
     if getattr(protocol, "USING_VITABENCH", False):
         raise RuntimeError(
             "vita_rl.harness_protocol was already loaded with VitaBench. "
-            "Run vita-mini in a fresh process or set VITA_RL_PROTOCOL=mini "
+            "Run a tool environment in a fresh process or set VITA_RL_PROTOCOL=mini "
             "before importing vita_rl.harness."
         )
     from vita_rl import harness  # pylint: disable=import-outside-toplevel
@@ -91,7 +92,7 @@ def _harness_constructor(name: str, harness: Any) -> type:
     try:
         return constructors[name]
     except KeyError as exc:
-        raise ValueError(f"Unknown mini harness {name!r}; choose from {', '.join(constructors)}") from exc
+        raise ValueError(f"Unknown harness {name!r}; choose from {', '.join(constructors)}") from exc
 
 
 def _message_to_dict(message: Any) -> dict[str, Any]:
@@ -109,8 +110,9 @@ def _message_to_dict(message: Any) -> dict[str, Any]:
     return value
 
 
-def run_mini_episode(
+def run_tool_environment_episode(
     *,
+    environment_name: str,
     task_id: str,
     harness_name: str,
     model: str,
@@ -120,14 +122,14 @@ def run_mini_episode(
     max_errors: int = 5,
     enable_think: bool = False,
     state_updater: Any | None = None,
-) -> MiniEpisodeResult:
-    """Run one task through any root-owned harness and evaluate it locally."""
+) -> EnvironmentEpisodeResult:
+    """Run one registered environment task through any root-owned harness."""
     if max_steps < 1 or max_errors < 1:
         raise ValueError("max_steps and max_errors must be positive")
     harness, protocol = _load_standalone_protocol()
-    env = MiniEnvironment()
+    env = tool_environment_registry.create(environment_name)
     observation = env.reset(task_id)
-    tools = [MiniSchemaTool(schema) for schema in env.openai_tools()]
+    tools = [SchemaTool(schema) for schema in env.openai_tools()]
     constructor = _harness_constructor(harness_name, harness)
     kwargs: dict[str, Any] = {
         "tools": tools,
@@ -163,7 +165,7 @@ def run_mini_episode(
             tool_messages.append(
                 protocol.ToolMessage(
                     role="tool",
-                    id=call.id or f"mini-call-{agent_turn}-{num_tool_calls}",
+                    id=call.id or f"tool-call-{agent_turn}-{num_tool_calls}",
                     name=call.name,
                     content=json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True),
                     error=not result.ok,
@@ -176,7 +178,8 @@ def run_mini_episode(
 
     evaluation = env.evaluate()
     messages = [_message_to_dict(message) for message in state.messages]
-    return MiniEpisodeResult(
+    return EnvironmentEpisodeResult(
+        environment=environment_name,
         task_id=task_id,
         harness=harness_name,
         reward=evaluation.reward,
@@ -206,6 +209,7 @@ class OpenAICompatibleGenerator:
         messages: list[Any],
         tools: list[Any] | None,
         enable_think: bool = False,
+        extra_headers: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> Any:
         _, protocol = _load_standalone_protocol()
@@ -220,12 +224,16 @@ class OpenAICompatibleGenerator:
         for key in ("temperature", "max_tokens", "top_p", "seed"):
             if kwargs.get(key) is not None:
                 payload[key] = kwargs[key]
+        if "max_tokens" not in payload and kwargs.get("max_new_tokens") is not None:
+            payload["max_tokens"] = kwargs["max_new_tokens"]
         # SGLang forwards this field to Qwen chat templates when supported.
         if enable_think:
             payload["chat_template_kwargs"] = {"enable_thinking": True}
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        if extra_headers:
+            headers.update(extra_headers)
         request = Request(
             self.base_url,
             data=json.dumps(payload).encode("utf-8"),
@@ -295,15 +303,16 @@ def _openai_message(message: Any) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a deterministic vita-mini episode through a vita-rl harness.")
+    parser = argparse.ArgumentParser(description="Run a deterministic tool environment through a vita-rl harness.")
+    parser.add_argument("--environment", default="vita-mini", choices=tool_environment_registry.names())
     parser.add_argument("--task-id", default="buy_coffee")
     parser.add_argument("--harness", default="vita_rl_standard", choices=(
         "vita_rl_standard", "vita_rl_stateful", "vita_rl_summary",
         "vita_rl_recent_turns", "vita_rl_state_delta",
     ))
     parser.add_argument("--model", required=True, help="Qwen model identifier accepted by the OpenAI-compatible endpoint.")
-    parser.add_argument("--base-url", default=os.environ.get("VITA_MINI_BASE_URL", "http://127.0.0.1:30000/v1/chat/completions"))
-    parser.add_argument("--api-key", default=os.environ.get("VITA_MINI_API_KEY"))
+    parser.add_argument("--base-url", default=os.environ.get("ENVIRONMENT_BASE_URL", "http://127.0.0.1:30000/v1/chat/completions"))
+    parser.add_argument("--api-key", default=os.environ.get("ENVIRONMENT_API_KEY"))
     parser.add_argument("--max-steps", type=int, default=30)
     parser.add_argument("--max-errors", type=int, default=5)
     parser.add_argument("--temperature", type=float, default=0.0)
@@ -311,7 +320,8 @@ def main() -> None:
     parser.add_argument("--enable-think", action="store_true")
     parser.add_argument("--output", type=Path, help="Optional JSON episode-record destination.")
     args = parser.parse_args()
-    result = run_mini_episode(
+    result = run_tool_environment_episode(
+        environment_name=args.environment,
         task_id=args.task_id,
         harness_name=args.harness,
         model=args.model,

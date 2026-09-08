@@ -1,17 +1,20 @@
 # vita-rl
 
-Experiment and method code for VitaBench post-training research.
+Experiment and method code for tool-use post-training across interchangeable
+environments.
 
 ## Architecture
 
-- **VitaBench** is the external environment and benchmark. It remains at
-  `/workspace/projects/vitabench` and is not vendored here.
+- **vita-mini** is the first self-contained deterministic environment under
+  `external/`; it requires neither GPT user simulation nor LLM evaluation.
+- **VitaBench** remains an optional legacy benchmark backend at
+  `external/vitabench`.
 - **SGLang** is the inference backend serving the local Qwen model on
   `http://127.0.0.1:30000/v1/chat/completions`.
 - **Dressage/slime** are later RL infrastructure. They are external runtime
   dependencies, not part of this repository.
-- **vita-rl** contains reproducible experiment configuration, launch scripts,
-  and our future trajectory/state/reward/method code.
+- **vita-rl** contains shared harnesses, the environment runtime, Dressage
+  adapter, deterministic rewards, and reproducible launch scripts.
 
 GitHub (`Matrix9494/vita-rl`) is the source of truth. GiveMeANode node
 `vita-dev` is the primary development and experiment machine; this checkout is
@@ -80,8 +83,26 @@ Keep the upstream VitaBench and Dressage checkouts separate. Future RL
 integration should use adapters in this repository and should not modify those
 upstream projects unless a separate, deliberate change is required.
 
-## Placeholders
+## Environment runtime
 
-`trajectory.py`, `state.py`, `reward.py`, and `dressage_adapter.py` are
-intentionally small placeholders. They define only the initial interfaces and
-documentation needed to begin experiments; they do not implement RL yet.
+The root-owned runtime is environment-neutral. `vita-mini` is a deterministic
+tool environment and `vitabench` is a legacy backend; both are selected by an
+`environment` field in the same Dressage episode API. New deterministic
+environments register the `reset/openai_tools/call_tool/evaluate` contract in
+`vita_rl.environments` and run through the existing harnesses unchanged.
+
+For Dressage/Vessl, prompt metadata uses the same neutral fields:
+
+```json
+{
+  "environment": "vita-mini",
+  "task_id": "buy_coffee",
+  "agent_model": "proxy-model",
+  "environment_args": {"harness": "vita_rl_standard"}
+}
+```
+
+Start the runtime with `python -m vita_rl.runtime_server` and point Dressage
+at it with `ENVIRONMENT_RUNTIME_URL`. The Vessl smoke launcher is
+`scripts/run_environment_grpo_smoke.sh`; set `ENVIRONMENT=vita-mini` to avoid
+the VitaBench-only OpenRouter user/evaluator relay.

@@ -72,7 +72,7 @@ documented business APIs.
 
 ## Running Qwen through vita-rl harnesses
 
-From the repository root, use the independent mini rollout runner.  It uses
+From the repository root, use the environment-neutral rollout runner. It uses
 the root-owned harness classes (`vita_rl_standard`, `vita_rl_stateful`,
 `vita_rl_summary`, `vita_rl_recent_turns`, and `vita_rl_state_delta`) but owns
 the episode loop locally.  There is no VitaBench import, GPT user, or LLM
@@ -81,7 +81,8 @@ evaluator in this path.
 ```bash
 PYTHONPATH=src:external/vita-mini/src \
 VITA_RL_PROTOCOL=mini \
-.venv-eval/bin/python -m vita_rl.mini_runner \
+.venv-eval/bin/python -m vita_rl.environment_runner \
+  --environment vita-mini \
   --task-id buy_coffee \
   --harness vita_rl_standard \
   --model /u/dz13/vita-rl/models/Qwen3.5-4B
@@ -89,7 +90,10 @@ VITA_RL_PROTOCOL=mini \
 
 The runner expects an OpenAI-compatible endpoint at
 `http://127.0.0.1:30000/v1/chat/completions`; override it with
-`--base-url` or `VITA_MINI_BASE_URL`.  It sends Qwen exactly the harness's
+`--base-url` or `ENVIRONMENT_BASE_URL`. It sends Qwen exactly the harness's
 native transcript and the tool schemas, executes each returned tool call via
-`MiniEnvironment`, then gives Qwen role-`tool` results.  At termination it
-calls `env.evaluate()` for the deterministic reward.
+`MiniEnvironment`, then gives Qwen role-`tool` results. At termination it
+calls `env.evaluate()` for the deterministic reward. Future custom
+environments implement the same contract and register once with
+`vita_rl.environments.tool_environment_registry`; they use this exact runner,
+not an environment-specific copy.

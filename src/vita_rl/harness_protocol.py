@@ -2,7 +2,7 @@
 
 The existing VitaBench objects remain the default so its runner and tests are
 unchanged.  ``VITA_RL_PROTOCOL=mini`` selects the deliberately small local
-implementation used by :mod:`vita_rl.mini_runner`; that path has no import of
+implementation used by :mod:`vita_rl.environment_runner`; that path has no import of
 the external VitaBench package.
 """
 
@@ -156,7 +156,7 @@ if _mode == "mini":
         del args, kwargs
         raise RuntimeError(
             "The standalone harness protocol needs an injected generate_fn. "
-            "Use vita_rl.mini_runner.run_mini_episode()."
+            "Use vita_rl.environment_runner.run_tool_environment_episode()."
         )
 
 

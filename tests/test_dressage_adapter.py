@@ -1,5 +1,5 @@
 import asyncio
-from vita_rl.dressage_adapter import VitaRuntimeClient, VitaWhiteboxAgent
+from vita_rl.dressage_adapter import EnvironmentWhiteboxAgent, VitaRuntimeClient, VitaWhiteboxAgent
 from vita_rl.vita_server import EpisodeRequest, EpisodeResponse
 
 def test_runtime_client_preserves_payload():
@@ -22,3 +22,19 @@ def test_adapter_propagates_metadata(monkeypatch):
     agent=VitaWhiteboxAgent(); agent.session_id="s"; agent.instance_id="i"; agent.runtime_client_factory=Client
     assert asyncio.run(agent.rollout(Sample(),{})) == "final"
     assert Sample.metadata["vita_reward"] == 1.0 and Sample.metadata["vita_num_agent_turns"] == 3
+
+def test_adapter_emits_neutral_environment_request_and_metadata(monkeypatch):
+    class Sample:
+        metadata={"environment":"vita-mini","task_id":"buy_coffee","runtime_url":"http://runtime","environment_args":{"harness":"vita_rl_stateful"}}
+    class Client:
+        def __init__(self,url): assert url == "http://runtime"
+        async def episode(self,request):
+            assert request.environment == "vita-mini"
+            assert request.task_id == "buy_coffee"
+            assert request.environment_args == {"harness":"vita_rl_stateful"}
+            return EpisodeResponse("buy_coffee",True,1.0,"assistant_final",4,4,{"environment":"vita-mini"},"final")
+    monkeypatch.setattr("vita_rl.dressage_adapter._proxy_url",lambda:"http://proxy")
+    agent=EnvironmentWhiteboxAgent(); agent.session_id="s"; agent.instance_id="i"; agent.runtime_client_factory=Client
+    assert asyncio.run(agent.rollout(Sample(),{})) == "final"
+    assert Sample.metadata["environment_reward"] == 1.0
+    assert Sample.metadata["environment_name"] == "vita-mini"

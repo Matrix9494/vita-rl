@@ -6,8 +6,12 @@ def test_request_schema_round_trip():
     request=EpisodeRequest.from_dict(payload())
     assert request.dressage_proxy_url == "http://proxy/"
     assert request.to_dict()["sampling_params"]["temperature"] == 0.2
-def test_first_milestone_scope_is_enforced():
-    data=payload(); data["task_id"]="other"
+def test_environment_selection_is_validated():
+    data=payload(); data["environment"]="vita-mini"; data["task_id"]="buy_coffee"
+    request=EpisodeRequest.from_dict(data)
+    assert request.environment == "vita-mini"
+    assert request.environment_args == {"domain":"delivery", "language":"chinese"}
+    data["environment"]="unknown"
     with pytest.raises(EpisodeValidationError): EpisodeRequest.from_dict(data)
 def test_response_schema_round_trip():
     response=EpisodeResponse("10711001",True,1.0,"agent_stop",2,2,{"message_count":4},"done")
