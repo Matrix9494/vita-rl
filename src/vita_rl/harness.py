@@ -13,27 +13,27 @@ import json
 import os
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from loguru import logger
 from pydantic import Field
-from vita.agent.base import (
-    LocalAgent,
-    ValidAgentInputMessage,
-    is_valid_agent_history_message,
-)
-from vita.agent.llm_agent import LLMAgent, LLMAgentState
-from vita.data_model.message import (
+from vita_rl.harness_protocol import (
     AssistantMessage,
+    LLMAgent,
+    LLMAgentState,
+    LocalAgent,
     Message,
     MultiToolMessage,
     SystemMessage,
+    Tool,
     ToolMessage,
     UserMessage,
+    ValidAgentInputMessage,
+    generate,
+    get_now,
+    get_weekday,
+    is_valid_agent_history_message,
 )
-from vita.environment.tool import Tool
-from vita.utils.llm_utils import generate
-from vita.utils.utils import get_now, get_weekday
 
 from vita_rl.state import AgentWorkingState
 from vita_rl.state_delta import (
@@ -85,6 +85,7 @@ class VitaRLStandardAgent(LLMAgent):
         time=None,
         enable_think: bool = False,
         language: str = None,
+        generate_fn: Callable[..., AssistantMessage] | None = None,
     ):
         # ``VitaRLStandardAgent`` subclasses LLMAgent so the external runner
         # recognizes it. Calling ``super()`` here would invoke LLMAgent's own
@@ -98,6 +99,7 @@ class VitaRLStandardAgent(LLMAgent):
         # particular, auxiliary calls (summary/delta proposals) do not
         # silently turn reasoning on or off relative to action generation.
         self.enable_think = bool(enable_think)
+        self._generate_fn = generate_fn
 
     @property
     def system_prompt(self) -> str:
@@ -135,7 +137,7 @@ class VitaRLStandardAgent(LLMAgent):
         self, *, messages: list[Message], tools: list[Tool] | None
     ) -> AssistantMessage:
         """Run one harness-owned LLM request under the common call policy."""
-        return generate(
+        return (self._generate_fn or generate)(
             model=self.llm,
             tools=tools,
             messages=messages,
