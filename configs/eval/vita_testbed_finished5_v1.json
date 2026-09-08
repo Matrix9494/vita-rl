@@ -1,0 +1,31 @@
+{
+  "name": "vita_testbed_finished5_v1",
+  "description": "The five fully checkpointed cross-domain VitaBench tasks from cancelled run 94003; retain as a fast, repeatable regression testbed.",
+  "source_run": {
+    "slurm_job_id": "94003",
+    "result_file": "outputs/vita40-94003.json",
+    "status": "cancelled_after_checkpointing_five_completed_simulations"
+  },
+  "task_set": "cross_domain",
+  "task_ids": [
+    "10808003",
+    "10812005",
+    "10808002",
+    "10811012",
+    "10807008"
+  ],
+  "baseline_outcomes": {
+    "agent": "vita_rl_stateful",
+    "rewards": {
+      "10808003": 0.0,
+      "10812005": 0.0,
+      "10808002": 0.0,
+      "10811012": 0.0,
+      "10807008": 0.0
+    }
+  },
+  "usage": {
+    "task_ids_env": "10808003 10812005 10808002 10811012 10807008",
+    "note": "Pass these IDs via --task-ids or VITA_TASK_IDS for future fixed-set runs."
+  }
+}

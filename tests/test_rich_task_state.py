@@ -69,6 +69,26 @@ def test_food_restrictions_are_independent_and_negative_claims_stay_unverified()
     assert constraints["delivery:food:high_purine"].status == "known"
 
 
+def test_delivery_language_records_explicit_account_address_and_restrictions():
+    state = AgentWorkingState()
+    state.observe({
+        "kind": "user",
+        "content": (
+            "I need lunch delivered. My user ID is U000001. The delivery address is the Yunnan University "
+            "Affiliated Hospital. Just one serving is enough. Avoid anything high in "
+            "purine, and don't use a delivery-only small operation."
+        ),
+    })
+
+    task = state.task_state
+    assert task.world_facts["user_id"].value == "U000001"
+    assert task.world_facts["requested_quantity"].value == 1
+    assert task.execution.destination == "Yunnan University Affiliated Hospital"
+    assert task.active_goal and task.active_goal.destination == task.execution.destination
+    assert task.constraints["delivery:food:high_purine"].desired_value == "forbidden"
+    assert task.constraints["delivery:provider:delivery_only"].desired_value == "forbidden"
+
+
 def test_restriction_words_do_not_become_fake_food_categories_or_reopen_order_goal():
     state = AgentWorkingState()
     state.observe({"kind": "user", "content": "Deliver rice noodles; avoid high-purine foods."})
@@ -83,6 +103,17 @@ def test_restriction_words_do_not_become_fake_food_categories_or_reopen_order_go
     state.observe(_tool("create", "create_delivery_order", "Order(order_id='D1', status='unpaid')"))
     assert state.task_state.active_goal and state.task_state.active_goal.status == "completed"
     state.observe({"kind": "user", "content": "I don't want any risks with the food."})
+    assert state.task_state.active_goal and state.task_state.active_goal.status == "completed"
+
+
+def test_closing_language_does_not_reopen_a_completed_goal():
+    state = AgentWorkingState()
+    state.observe({"kind": "user", "content": "I need lunch delivered."})
+    state.record_action(_action("create", "create_delivery_order", {
+        "store_id": "S1", "product_ids": ["P1"], "product_cnts": [1],
+    }))
+    state.observe(_tool("create", "create_delivery_order", "Order(order_id='D1', status='unpaid')"))
+    state.observe({"kind": "user", "content": "No, that's it. I need to get some rest now. Thanks."})
     assert state.task_state.active_goal and state.task_state.active_goal.status == "completed"
 
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Configurable two-H100 VitaBench batch. The local SGLang server uses two
-# data-parallel replicas and admits at most 20 running requests; VitaBench
-# launches at most 20 simulations concurrently. By default it remains a
-# 40-task cross-domain diagnostic. Set VITA_TASK_SET and VITA_TASK_COUNT to
-# run any complete 100-task set; the full benchmark is four such batches.
+# data-parallel replicas and accepts the configured number of running requests;
+# VitaBench launches the same number of simulations concurrently. By default it
+# remains a 40-task cross-domain diagnostic. Set VITA_TASK_SET and
+# VITA_TASK_COUNT to run any complete 100-task set; the full benchmark is four
+# such batches.
 #SBATCH --account=llmreason
 #SBATCH --partition=general
 #SBATCH --gres=gpu:H100:2
@@ -35,6 +36,7 @@ SUMMARY="$REPO/outputs/vita40_summary-${JOB_TAG}.json"
 SELECTION="$REPO/outputs/vita40_tasks-${JOB_TAG}.json"
 SGLANG_SMOKE="$REPO/outputs/sglang_qwen35_smoke-${JOB_TAG}.json"
 OPENROUTER_LOG="$REPO/logs/openrouter-vita40-${JOB_TAG}.log"
+SUMMARY_TRACE="${VITA_SUMMARY_TRACE_PATH:-$REPO/outputs/vita_summary_trace-${JOB_TAG}.jsonl}"
 
 case "$TASK_SET" in
     delivery|ota|instore)
@@ -54,6 +56,7 @@ source "$VENV/bin/activate"
 export VITA_INPUT_TOKENIZER_PATH="$MODEL"
 export HF_HOME=/data/user/dz13/vita-rl/hf-cache
 export TRANSFORMERS_CACHE="$HF_HOME"
+export VITA_SUMMARY_TRACE_PATH="$SUMMARY_TRACE"
 
 SGLANG_PID=""
 OPENROUTER_PID=""

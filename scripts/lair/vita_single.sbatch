@@ -18,12 +18,22 @@ REPO=/u/dz13/vita-rl
 VENV="$REPO/.venv-eval"
 MODEL="$REPO/models/Qwen3.5-4B"
 VITABENCH="$REPO/external/vitabench"
-PORT="${SGLANG_PORT:-30000}"
+# Multiple Slurm jobs may share a GPU node. Use a job-unique loopback port by
+# default so concurrent smokes never attach to or shut down each other's local
+# SGLang server. An explicit SGLANG_PORT still overrides this for debugging.
+DEFAULT_PORT=$((30000 + ${SLURM_JOB_ID:-0} % 10000))
+PORT="${SGLANG_PORT:-$DEFAULT_PORT}"
 BASE_URL="http://127.0.0.1:${PORT}/v1"
 TASK_IDS="${VITA_TASK_IDS:-${VITA_TASK_ID:-10711001}}"
+DOMAIN="${VITA_DOMAIN:-delivery}"
+TASK_SET_NAME="${VITA_TASK_SET_NAME:-}"
 MAX_STEPS="${VITA_MAX_STEPS:-100}"
 AGENT_THINKING="${VITA_AGENT_THINKING:-false}"
 AGENT_IMPLEMENTATION="${VITA_AGENT_IMPLEMENTATION:-vita_rl_standard}"
+EFFECTIVE_AGENT_THINKING="$AGENT_THINKING"
+if [[ "$AGENT_IMPLEMENTATION" == "vita_rl_state_delta" ]]; then
+    EFFECTIVE_AGENT_THINKING=true
+fi
 JOB_TAG="${SLURM_JOB_ID:-manual}"
 SGLANG_LOG="$REPO/logs/sglang-${JOB_TAG}.log"
 RESULT="$REPO/outputs/vita_single-${JOB_TAG}.json"
@@ -31,6 +41,9 @@ SUMMARY="$REPO/outputs/vita_diagnostic-${JOB_TAG}.json"
 SGLANG_SMOKE="$REPO/outputs/sglang_qwen35_smoke-${JOB_TAG}.json"
 OPENROUTER_LOG="$REPO/logs/openrouter-${JOB_TAG}.log"
 STATE_TRACE="${VITA_STATE_TRACE_PATH:-$REPO/outputs/vita_state_trace-${JOB_TAG}.jsonl}"
+DELTA_STATE_TRACE="${VITA_STATE_DELTA_TRACE_PATH:-$REPO/outputs/vita_state_delta_trace-${JOB_TAG}.jsonl}"
+STANDARD_THINKING_TRACE="${VITA_STANDARD_THINKING_TRACE_PATH:-$REPO/outputs/vita_standard_thinking_trace-${JOB_TAG}.jsonl}"
+SUMMARY_TRACE="${VITA_SUMMARY_TRACE_PATH:-$REPO/outputs/vita_summary_trace-${JOB_TAG}.jsonl}"
 
 mkdir -p "$REPO/logs" "$REPO/outputs"
 source "$VENV/bin/activate"
@@ -38,7 +51,13 @@ export VITA_INPUT_TOKENIZER_PATH="$MODEL"
 export HF_HOME=/data/user/dz13/vita-rl/hf-cache
 export TRANSFORMERS_CACHE="$HF_HOME"
 export VITA_STATE_TRACE_PATH="$STATE_TRACE"
+export VITA_STATE_DELTA_TRACE_PATH="$DELTA_STATE_TRACE"
+export VITA_STANDARD_THINKING_TRACE_PATH="$STANDARD_THINKING_TRACE"
+export VITA_SUMMARY_TRACE_PATH="$SUMMARY_TRACE"
 echo "State trace: $VITA_STATE_TRACE_PATH"
+echo "State-delta trace: $VITA_STATE_DELTA_TRACE_PATH"
+echo "Standard thinking trace: $VITA_STANDARD_THINKING_TRACE_PATH"
+echo "Summary trace: $VITA_SUMMARY_TRACE_PATH"
 
 SGLANG_PID=""
 OPENROUTER_PID=""
@@ -179,8 +198,13 @@ cd "$VITABENCH"
 # whitespace-separated sequence of VitaBench task identifiers.
 # shellcheck disable=SC2206
 TASK_ID_ARGS=( $TASK_IDS )
+TASK_SET_ARGS=()
+if [[ -n "$TASK_SET_NAME" ]]; then
+    TASK_SET_ARGS=(--task-set-name "$TASK_SET_NAME")
+fi
 PYTHONPATH="$REPO/src${PYTHONPATH:+:$PYTHONPATH}" python -m vita_rl.vita_cli run \
-    --domain delivery \
+    --domain "$DOMAIN" \
+    "${TASK_SET_ARGS[@]}" \
     --task-ids "${TASK_ID_ARGS[@]}" \
     --agent "$AGENT_IMPLEMENTATION" \
     --agent-llm "$AGENT_MODEL" \
@@ -193,7 +217,7 @@ PYTHONPATH="$REPO/src${PYTHONPATH:+:$PYTHONPATH}" python -m vita_rl.vita_cli run
     --language english \
     --save-to "$RESULT"
 
-python - "$RESULT" "$SUMMARY" "$SGLANG_SMOKE" <<'PY'
+python - "$RESULT" "$SUMMARY" "$SGLANG_SMOKE" "$EFFECTIVE_AGENT_THINKING" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -201,6 +225,7 @@ from pathlib import Path
 result = Path(sys.argv[1])
 summary_path = Path(sys.argv[2])
 sglang_smoke_path = sys.argv[3]
+effective_agent_thinking = sys.argv[4] == "true"
 payload = json.loads(result.read_text())
 simulations = payload.get("simulations", [])
 if not simulations:
@@ -272,7 +297,7 @@ summary = {
         "agent_model": "qwen35-4b-local",
         "user_simulator_model": "gpt-4.1",
         "evaluator_model": "gpt-4.1",
-        "agent_thinking": "${AGENT_THINKING}" == "true",
+        "agent_thinking": effective_agent_thinking,
         "user_simulator_thinking": "provider_default (gpt-4.1)",
         "evaluator_thinking": "provider_default (gpt-4.1)",
         "temperature": 1.0,
