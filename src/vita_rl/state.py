@@ -282,7 +282,11 @@ class TaskState:
     def _set_active_goal(self, text: str, domain: str, turn: int) -> None:
         """Create or refine a persistent task goal using explicit user text."""
         lowered = text.lower()
-        if re.search(r"\b(?:no further help|i'll handle it|i will handle it|stop|never mind|nevermind)\b", lowered):
+        if re.search(
+            r"\b(?:no further help|i'll handle it|i will handle it|stop|never mind|nevermind|"
+            r"that's it|that is it|that's all|all set|nothing else)\b",
+            lowered,
+        ):
             if self.active_goal and self.active_goal.status == "active":
                 self.active_goal.status = "abandoned"
             return
@@ -420,11 +424,27 @@ class TaskState:
         if "fried" in lowered and re.search(r"\b(?:avoid|without|no|not|nothing)\b", lowered):
             self._upsert_constraint(domain=domain, subject="food", field_name="fried", desired_value="forbidden", source_turn=turn, source_text=text)
             found = True
-        if re.search(r"\bhigh[- ]purine\b", lowered) and re.search(r"\b(?:avoid|without|no|not|nothing)\b", lowered):
+        if re.search(r"\bhigh(?:[- ]|\s+in\s+)purine\b", lowered) and re.search(r"\b(?:avoid|without|no|not|nothing)\b", lowered):
             self._upsert_constraint(domain=domain, subject="food", field_name="high_purine", desired_value="forbidden", source_turn=turn, source_text=text)
             found = True
-        if re.search(r"\b(?:no|not)\s+(?:a\s+)?small\s+delivery[- ]only|not[^.]{0,35}delivery[- ]only", lowered):
+        if re.search(
+            r"\b(?:no|not|isn't|aren't|avoid)\b[^.]{0,45}\b(?:delivery[- ]only|small operation)\b",
+            lowered,
+        ):
             self._upsert_constraint(domain=domain, subject="provider", field_name="delivery_only", desired_value="forbidden", source_turn=turn, source_text=text)
+            found = True
+        user_id_match = re.search(
+            r"\b(?:user|customer)\s*id\s*(?:is|:)?\s*([A-Za-z0-9_-]+)\b",
+            text,
+            re.IGNORECASE,
+        )
+        if user_id_match:
+            self._set_fact("user_id", user_id_match.group(1), "user_id", "user", turn)
+            found = True
+        if re.search(r"\b(?:just\s+)?one\s+(?:serving|portion)\b", lowered):
+            # This is a directly stated operational parameter, but without a
+            # product noun it must not become an unmatchable item constraint.
+            self._set_fact("requested_quantity", 1, "quantity", "user", turn)
             found = True
         if re.search(r"\b(?:something|try)\s+(?:new|different)|tired of (?:my )?usual", lowered):
             self._upsert_constraint(domain=domain, subject="preference", field_name="novelty", desired_value="preferred", source_turn=turn, source_text=text)
@@ -467,7 +487,10 @@ class TaskState:
             self._upsert_constraint(domain=domain, subject="reservation", field_name="party_size", desired_value=int(party_match.group(1)), source_turn=turn, source_text=text)
             self._upsert_subgoal(domain, "reservation")
             found = True
-        address_match = re.search(r"\b(?:deliver(?:y)?\s+(?:it\s+)?to|address(?:\s+is)?|to)\s+([A-Z][^,.!?;]{3,120})", text)
+        address_match = re.search(
+            r"\b(?:deliver(?:y)?\s+(?:it\s+)?to|(?:delivery\s+)?address(?:\s+is)?|to)\s+(?:the\s+)?([A-Z][^,.!?;]{3,120})",
+            text,
+        )
         if address_match:
             self._upsert_constraint(domain=domain, subject="delivery", field_name="address", desired_value=address_match.group(1).strip(), source_turn=turn, source_text=text)
             self._upsert_subgoal(domain, "delivery supplies")
