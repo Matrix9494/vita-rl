@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import Field
 from vita.agent.base import (
     LocalAgent,
     ValidAgentInputMessage,
@@ -52,6 +52,22 @@ STATEFUL_HARNESS_NAME = "vita_rl_stateful"
 STATE_DELTA_HARNESS_NAME = "vita_rl_state_delta"
 
 
+def _positive_window_size(*environment_names: str, default: int) -> int:
+    """Read one positive history-window setting with legacy-name fallback."""
+    for environment_name in environment_names:
+        raw_value = os.environ.get(environment_name)
+        if raw_value is None:
+            continue
+        try:
+            value = int(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{environment_name} must be a positive integer") from exc
+        if value < 1:
+            raise ValueError(f"{environment_name} must be a positive integer")
+        return value
+    return default
+
+
 class VitaRLStandardAgent(LLMAgent):
     """A source-controlled replica of VitaBench's current ``LLMAgent``.
 
@@ -78,7 +94,10 @@ class VitaRLStandardAgent(LLMAgent):
         self.llm = llm
         self.llm_args = deepcopy(llm_args) if llm_args is not None else {}
         self.time = time + " " + get_weekday(time, language)
-        self.enable_think = enable_think
+        # Every LLM call made by a harness reads this one policy bit.  In
+        # particular, auxiliary calls (summary/delta proposals) do not
+        # silently turn reasoning on or off relative to action generation.
+        self.enable_think = bool(enable_think)
 
     @property
     def system_prompt(self) -> str:
@@ -102,18 +121,8 @@ class VitaRLStandardAgent(LLMAgent):
     def generate_next_message(
         self, message: ValidAgentInputMessage, state: LLMAgentState
     ) -> tuple[AssistantMessage, LLMAgentState]:
-        if isinstance(message, MultiToolMessage):
-            state.messages.extend(message.tool_messages)
-        else:
-            state.messages.append(message)
-
-        assistant_message = generate(
-            model=self.llm,
-            tools=self.tools,
-            messages=state.system_messages + state.messages,
-            enable_think=self.enable_think,
-            **self.llm_args,
-        )
+        self._append_event_to_transcript(state, message)
+        assistant_message = self._generate_action(state.system_messages + state.messages)
         state.messages.append(assistant_message)
         self._save_standard_thinking_trace(
             message=message,
@@ -122,8 +131,49 @@ class VitaRLStandardAgent(LLMAgent):
         )
         return assistant_message, state
 
+    def _generate(
+        self, *, messages: list[Message], tools: list[Tool] | None
+    ) -> AssistantMessage:
+        """Run one harness-owned LLM request under the common call policy."""
+        return generate(
+            model=self.llm,
+            tools=tools,
+            messages=messages,
+            enable_think=self.enable_think,
+            **self.llm_args,
+        )
+
+    def _generate_action(self, messages: list[Message]) -> AssistantMessage:
+        return self._generate(messages=messages, tools=self.tools)
+
+    def _generate_auxiliary(self, messages: list[Message]) -> AssistantMessage:
+        """Generate non-action text without exposing environment tools."""
+        return self._generate(messages=messages, tools=None)
+
     @staticmethod
-    def _standard_trace_observation(message: ValidAgentInputMessage) -> dict[str, Any]:
+    def _append_event_to_transcript(
+        state: LLMAgentState, message: ValidAgentInputMessage
+    ) -> None:
+        if isinstance(message, MultiToolMessage):
+            state.messages.extend(message.tool_messages)
+        else:
+            state.messages.append(message)
+
+    @staticmethod
+    def _action(message: AssistantMessage) -> dict[str, Any]:
+        return {
+            "content": message.content or "",
+            "tool_calls": [
+                {"id": call.id, "name": call.name, "arguments": call.arguments}
+                for call in (message.tool_calls or [])
+            ],
+        }
+
+    @staticmethod
+    def _observation(
+        message: ValidAgentInputMessage, *, include_tool_ids: bool = True
+    ) -> dict[str, Any]:
+        """Preserve an incoming user/tool event for an audit or state prompt."""
         if isinstance(message, UserMessage):
             return {"kind": "user", "content": message.content or ""}
         tool_messages = (
@@ -134,7 +184,7 @@ class VitaRLStandardAgent(LLMAgent):
             "kind": "tool",
             "results": [
                 {
-                    "id": tool_message.id,
+                    **({"id": tool_message.id} if include_tool_ids else {}),
                     "name": tool_message.name,
                     "content": tool_message.content or "",
                     "error": tool_message.error,
@@ -142,6 +192,20 @@ class VitaRLStandardAgent(LLMAgent):
                 for tool_message in tool_messages
             ],
         }
+
+    @classmethod
+    def _prompt_observation(cls, message: ValidAgentInputMessage) -> UserMessage:
+        """Encode one event where a native tool role would lack its call context."""
+        observation = cls._observation(message)
+        if observation["kind"] == "user":
+            return UserMessage(role="user", content=observation["content"])
+        return UserMessage(
+            role="user",
+            content=(
+                "[LATEST TOOL OBSERVATION]\n"
+                + json.dumps(observation["results"], ensure_ascii=False, sort_keys=True)
+            ),
+        )
 
     @staticmethod
     def _thinking_trace(message: AssistantMessage) -> str | None:
@@ -174,16 +238,14 @@ class VitaRLStandardAgent(LLMAgent):
             return
         record = {
             "turn": turn,
-            "raw_observation": self._standard_trace_observation(message),
-            "agent_action": {
-                "content": assistant_message.content or "",
-                "tool_calls": [
-                    {"id": call.id, "name": call.name, "arguments": call.arguments}
-                    for call in (assistant_message.tool_calls or [])
-                ],
-            },
+            "raw_observation": self._observation(message),
+            "agent_action": self._action(assistant_message),
             "action_thinking_trace": self._thinking_trace(assistant_message),
         }
+        self._append_jsonl(trace_path, record)
+
+    @staticmethod
+    def _append_jsonl(trace_path: str, record: dict[str, Any]) -> None:
         path = Path(trace_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
@@ -255,55 +317,10 @@ all user constraints are satisfied by actual tool-confirmed state.
 
     @staticmethod
     def _observation(message: ValidAgentInputMessage) -> dict[str, Any]:
-        if isinstance(message, UserMessage):
-            return {"kind": "user", "content": message.content or ""}
-        tool_messages = (
-            message.tool_messages if isinstance(message, MultiToolMessage) else [message]
-        )
-        assert all(isinstance(tool_message, ToolMessage) for tool_message in tool_messages)
-        return {
-            "kind": "tool",
-            "results": [
-                {
-                    "name": tool_message.name,
-                    "content": tool_message.content or "",
-                    "error": tool_message.error,
-                }
-                for tool_message in tool_messages
-            ],
-        }
-
-    @staticmethod
-    def _action(message: AssistantMessage) -> dict[str, Any]:
-        return {
-            "content": message.content or "",
-            "tool_calls": [
-                {"id": call.id, "name": call.name, "arguments": call.arguments}
-                for call in (message.tool_calls or [])
-            ],
-        }
-
-    @classmethod
-    def _prompt_observation(cls, message: ValidAgentInputMessage) -> UserMessage:
-        """Normalize one incoming event into the sole non-system prompt item.
-
-        A raw ``ToolMessage`` needs the assistant tool call that precedes it
-        in an OpenAI transcript.  That would reintroduce history into a
-        context-window experiment, so tool outcomes are presented as one
-        self-contained user observation instead.  The original messages stay
-        in ``state.messages`` for VitaBench callback compatibility and audit,
-        but never reach ``generate`` in this harness.
-        """
-        observation = cls._observation(message)
-        if observation["kind"] == "user":
-            return UserMessage(role="user", content=observation["content"])
-        return UserMessage(
-            role="user",
-            content=(
-                "[LATEST TOOL OBSERVATION]\n"
-                + json.dumps(observation["results"], ensure_ascii=False, sort_keys=True)
-            ),
-        )
+        # The original stateful tracker intentionally does not treat tool-call
+        # IDs as semantic state.  Keep that prompt contract while sharing the
+        # representation logic with the baseline and delta harness.
+        return VitaRLStandardAgent._observation(message, include_tool_ids=False)
 
     @staticmethod
     def _save_new_traces(state: StatefulHarnessState, trace_start: int) -> None:
@@ -353,10 +370,7 @@ all user constraints are satisfied by actual tool-confirmed state.
         # previous pending action before the next action is requested.
         trace_start = len(state.working_state.task_state.debug_traces)
         state.working_state.observe(self._observation(message))
-        if isinstance(message, MultiToolMessage):
-            state.messages.extend(message.tool_messages)
-        else:
-            state.messages.append(message)
+        self._append_event_to_transcript(state, message)
 
         # Qwen's chat template requires all system text to be at the start of
         # the transcript. Merge our state protocol into VitaBench's leading
@@ -370,15 +384,11 @@ all user constraints are satisfied by actual tool-confirmed state.
                 working_state=state.working_state.as_prompt()
             ),
         )
-        assistant_message = generate(
-            model=self.llm,
-            tools=self.tools,
+        assistant_message = self._generate_action(
             # The state system message plus exactly this new observation is
             # the entire model window.  ``state.messages`` is intentionally
             # excluded: it is retained only as a local audit transcript.
             messages=[state_message, self._prompt_observation(message)],
-            enable_think=self.enable_think,
-            **self.llm_args,
         )
         state.messages.append(assistant_message)
         state.working_state.record_action(self._action(assistant_message))
@@ -405,7 +415,51 @@ SUMMARY_HARNESS_NAME = "vita_rl_summary"
 RECENT_TURNS_HARNESS_NAME = "vita_rl_recent_turns"
 
 
-class SummaryHarnessState(LLMAgentState):
+class NativeTurnHarnessState(LLMAgentState):
+    """Full transcript plus a bounded prompt suffix split at whole turns.
+
+    A turn starts with a user message and includes every assistant/tool
+    exchange until the assistant gives a response without tool calls.  Native
+    roles and tool-call IDs remain untouched in both fields.
+    """
+
+    completed_turns: list[list[Message]] = Field(default_factory=list)
+    active_turn: list[Message] = Field(default_factory=list)
+
+    @property
+    def recent_messages(self) -> list[Message]:
+        return [message for turn in self.completed_turns for message in turn] + self.active_turn
+
+
+class NativeTurnContextAgent(VitaRLStandardAgent):
+    """Shared native-transcript bookkeeping for bounded-history harnesses."""
+
+    @staticmethod
+    def _native_messages(message: ValidAgentInputMessage) -> list[Message]:
+        return list(message.tool_messages) if isinstance(message, MultiToolMessage) else [message]
+
+    @staticmethod
+    def _is_turn_complete(message: Message) -> bool:
+        return isinstance(message, AssistantMessage) and not message.tool_calls
+
+    def _append_native_message(self, state: NativeTurnHarnessState, message: Message) -> None:
+        if isinstance(message, UserMessage) and state.active_turn:
+            # Preserve an unusual incomplete segment rather than dropping it.
+            state.completed_turns.append(state.active_turn)
+            state.active_turn = []
+        state.active_turn.append(message)
+        if self._is_turn_complete(message):
+            state.completed_turns.append(state.active_turn)
+            state.active_turn = []
+
+    def _restore_native_history(
+        self, state: NativeTurnHarnessState, message_history: list[Message]
+    ) -> None:
+        for history_message in message_history:
+            self._append_native_message(state, history_message)
+
+
+class SummaryHarnessState(NativeTurnHarnessState):
     """Transcript plus unconstrained rolling natural-language memory.
 
     ``summary`` is model-authored prose, not a CPU-defined task schema. The
@@ -417,17 +471,10 @@ class SummaryHarnessState(LLMAgentState):
 
     summary: str = ""
     event_turn: int = 0
-    completed_turns: list[list[Message]] = Field(default_factory=list)
-    active_turn: list[Message] = Field(default_factory=list)
     transition_log: list[dict[str, Any]] = Field(default_factory=list)
 
-    @property
-    def recent_messages(self) -> list[Message]:
-        """The verbatim action-context suffix, flattened only for prompting."""
-        return [message for turn in self.completed_turns for message in turn] + self.active_turn
 
-
-class VitaRLSummaryAgent(VitaRLStandardAgent):
+class VitaRLSummaryAgent(NativeTurnContextAgent):
     """A bounded-context agent with model-written rolling history summaries.
 
     The action model receives a model-written summary of the old transcript
@@ -457,30 +504,9 @@ The native messages following this context are the recent interaction history.
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
-        raw_window_size = os.environ.get("VITA_SUMMARY_WINDOW_SIZE", "5")
-        try:
-            self.summary_window_size = int(raw_window_size)
-        except ValueError as exc:
-            raise ValueError("VITA_SUMMARY_WINDOW_SIZE must be a positive integer") from exc
-        if self.summary_window_size < 1:
-            raise ValueError("VITA_SUMMARY_WINDOW_SIZE must be a positive integer")
-
-    @staticmethod
-    def _action(message: AssistantMessage) -> dict[str, Any]:
-        return {
-            "content": message.content or "",
-            "tool_calls": [
-                {"id": call.id, "name": call.name, "arguments": call.arguments}
-                for call in (message.tool_calls or [])
-            ],
-        }
-
-    @staticmethod
-    def _native_messages(message: ValidAgentInputMessage) -> list[Message]:
-        """Expand one environment event into its standard transcript messages."""
-        if isinstance(message, MultiToolMessage):
-            return list(message.tool_messages)
-        return [message]
+        self.summary_window_size = _positive_window_size(
+            "VITA_HISTORY_WINDOW_SIZE", "VITA_SUMMARY_WINDOW_SIZE", default=5
+        )
 
     @staticmethod
     def _serialize_message(message: Message) -> dict[str, Any]:
@@ -511,12 +537,10 @@ The native messages following this context are the recent interaction history.
             system_messages=[SystemMessage(role="system", content=self.system_prompt)],
             messages=list(message_history),
         )
-        for history_message in message_history:
-            self._append_native_message(state, history_message)
+        self._restore_native_history(state, message_history)
         # A resume may end at a completed natural-language assistant response.
         # Such a turn is eligible for compaction; a pending tool-call turn is
         # deliberately retained in full until it receives its tool result.
-        self._finish_active_turn_if_complete(state)
         self._compact(state)
         return state
 
@@ -531,38 +555,12 @@ The native messages following this context are the recent interaction history.
             ensure_ascii=False,
             sort_keys=True,
         )
-        return generate(
-            model=self.llm,
-            tools=None,
-            messages=[
+        return self._generate_auxiliary(
+            [
                 SystemMessage(role="system", content=self._SUMMARY_SYSTEM),
                 UserMessage(role="user", content=summary_input),
-            ],
-            enable_think=self.enable_think,
-            **self.llm_args,
+            ]
         )
-
-    @staticmethod
-    def _is_turn_complete(message: Message) -> bool:
-        return isinstance(message, AssistantMessage) and not message.tool_calls
-
-    def _append_native_message(self, state: SummaryHarnessState, message: Message) -> None:
-        """Append one native event without changing its role or representation."""
-        if isinstance(message, UserMessage) and state.active_turn:
-            # A new user query closes an unusual/incomplete prior segment rather
-            # than dropping it. Normal tool trajectories close via the final
-            # assistant response below.
-            state.completed_turns.append(state.active_turn)
-            state.active_turn = []
-        state.active_turn.append(message)
-        self._finish_active_turn_if_complete(state)
-
-    def _finish_active_turn_if_complete(self, state: SummaryHarnessState) -> bool:
-        if not state.active_turn or not self._is_turn_complete(state.active_turn[-1]):
-            return False
-        state.completed_turns.append(state.active_turn)
-        state.active_turn = []
-        return True
 
     def _compact(
         self, state: SummaryHarnessState
@@ -584,15 +582,12 @@ The native messages following this context are the recent interaction history.
             state.completed_turns = state.completed_turns[-self.summary_window_size :]
         return prefix, response
 
-    @staticmethod
-    def _save_summary_trace(record: dict[str, Any]) -> None:
+    @classmethod
+    def _save_summary_trace(cls, record: dict[str, Any]) -> None:
         trace_path = os.environ.get("VITA_SUMMARY_TRACE_PATH")
         if not trace_path:
             return
-        path = Path(trace_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        cls._append_jsonl(trace_path, record)
 
     def generate_next_message(
         self, message: ValidAgentInputMessage, state: SummaryHarnessState
@@ -601,10 +596,7 @@ The native messages following this context are the recent interaction history.
         state.event_turn += 1
         summary_before = state.summary
 
-        if isinstance(message, MultiToolMessage):
-            state.messages.extend(message.tool_messages)
-        else:
-            state.messages.append(message)
+        self._append_event_to_transcript(state, message)
         for incoming_message in incoming_messages:
             self._append_native_message(state, incoming_message)
 
@@ -623,13 +615,7 @@ The native messages following this context are the recent interaction history.
                 + self._SUMMARY_CONTEXT.format(summary=state.summary),
             )
         action_messages.extend(state.recent_messages)
-        assistant_message = generate(
-            model=self.llm,
-            tools=self.tools,
-            messages=action_messages,
-            enable_think=self.enable_think,
-            **self.llm_args,
-        )
+        assistant_message = self._generate_action(action_messages)
         state.messages.append(assistant_message)
         self._append_native_message(state, assistant_message)
         # A compaction boundary occurs only after this complete interaction
@@ -673,18 +659,11 @@ def register_summary_harness() -> None:
     registry.register_agent(VitaRLSummaryAgent, SUMMARY_HARNESS_NAME)
 
 
-class RecentTurnsHarnessState(LLMAgentState):
+class RecentTurnsHarnessState(NativeTurnHarnessState):
     """Full native transcript plus a bounded, verbatim recent-turn view."""
 
-    recent_turns: list[list[Message]] = Field(default_factory=list)
-    active_turn: list[Message] = Field(default_factory=list)
 
-    @property
-    def recent_messages(self) -> list[Message]:
-        return [message for turn in self.recent_turns for message in turn] + self.active_turn
-
-
-class VitaRLRecentTurnsAgent(VitaRLStandardAgent):
+class VitaRLRecentTurnsAgent(NativeTurnContextAgent):
     """Standard agent context truncated to the latest complete native turns.
 
     Unlike ``vita_rl_summary``, this ablation uses no model-written memory:
@@ -694,40 +673,23 @@ class VitaRLRecentTurnsAgent(VitaRLStandardAgent):
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
-        raw_window_size = os.environ.get(
+        self.recent_turns_window_size = _positive_window_size(
+            "VITA_HISTORY_WINDOW_SIZE",
             "VITA_RECENT_TURNS_WINDOW_SIZE",
-            os.environ.get("VITA_SUMMARY_WINDOW_SIZE", "10"),
+            # This last fallback maintains the command-line compatibility used
+            # by the initial paired summary/recent-turn experiments.
+            "VITA_SUMMARY_WINDOW_SIZE",
+            default=10,
         )
-        try:
-            self.recent_turns_window_size = int(raw_window_size)
-        except ValueError as exc:
-            raise ValueError("recent-turn window size must be a positive integer") from exc
-        if self.recent_turns_window_size < 1:
-            raise ValueError("recent-turn window size must be a positive integer")
-
-    @staticmethod
-    def _native_messages(message: ValidAgentInputMessage) -> list[Message]:
-        return list(message.tool_messages) if isinstance(message, MultiToolMessage) else [message]
-
-    @staticmethod
-    def _is_turn_complete(message: Message) -> bool:
-        return isinstance(message, AssistantMessage) and not message.tool_calls
 
     def _trim_complete_turns(self, state: RecentTurnsHarnessState) -> None:
-        if len(state.recent_turns) > self.recent_turns_window_size:
-            state.recent_turns = state.recent_turns[-self.recent_turns_window_size :]
+        if len(state.completed_turns) > self.recent_turns_window_size:
+            state.completed_turns = state.completed_turns[-self.recent_turns_window_size :]
 
     def _append_native_message(self, state: RecentTurnsHarnessState, message: Message) -> None:
-        if isinstance(message, UserMessage) and state.active_turn:
-            state.recent_turns.append(state.active_turn)
-            state.active_turn = []
-            self._trim_complete_turns(state)
-        state.active_turn.append(message)
-        if self._is_turn_complete(message):
-            state.recent_turns.append(state.active_turn)
-            state.active_turn = []
-            # Truncation starts only after a whole native interaction turn.
-            self._trim_complete_turns(state)
+        super()._append_native_message(state, message)
+        # Truncation starts only after a whole native interaction turn.
+        self._trim_complete_turns(state)
 
     def get_init_state(
         self, message_history: Optional[list[Message]] = None
@@ -741,26 +703,18 @@ class VitaRLRecentTurnsAgent(VitaRLStandardAgent):
             system_messages=[SystemMessage(role="system", content=self.system_prompt)],
             messages=list(message_history),
         )
-        for history_message in message_history:
-            self._append_native_message(state, history_message)
+        self._restore_native_history(state, message_history)
         return state
 
     def generate_next_message(
         self, message: ValidAgentInputMessage, state: RecentTurnsHarnessState
     ) -> tuple[AssistantMessage, RecentTurnsHarnessState]:
-        if isinstance(message, MultiToolMessage):
-            state.messages.extend(message.tool_messages)
-        else:
-            state.messages.append(message)
+        self._append_event_to_transcript(state, message)
         for incoming_message in self._native_messages(message):
             self._append_native_message(state, incoming_message)
 
-        assistant_message = generate(
-            model=self.llm,
-            tools=self.tools,
-            messages=[state.system_messages[0], *state.recent_messages],
-            enable_think=self.enable_think,
-            **self.llm_args,
+        assistant_message = self._generate_action(
+            [state.system_messages[0], *state.recent_messages]
         )
         state.messages.append(assistant_message)
         self._append_native_message(state, assistant_message)
@@ -808,11 +762,14 @@ class VitaRLStateDeltaAgent(VitaRLStandardAgent):
     """
 
     def __init__(self, *args: Any, state_updater: StateUpdater | None = None, **kwargs: Any):
+        # Delta was introduced as a reasoning-first experiment.  Preserve that
+        # default for direct construction, while an explicit caller/CLI value
+        # remains the sole policy used by both updater and action requests.
+        # The sixth positional argument of the baseline constructor is also
+        # ``enable_think``; do not add a keyword when a legacy caller used it.
+        if len(args) < 6:
+            kwargs.setdefault("enable_think", True)
         super().__init__(*args, **kwargs)
-        # Delta proposals and actions are intentionally both reasoning passes.
-        # Keep this harness-level guarantee independent of a launcher's generic
-        # ``--enable-think`` default, which also applies to non-delta agents.
-        self.enable_think = True
         # ``LLMStateUpdater`` consumes only an updater's final JSON string.
         # Retain its reasoning until the surrounding transition is recorded.
         self._updater_thinking_trace: str | None = None
@@ -834,18 +791,11 @@ class VitaRLStateDeltaAgent(VitaRLStandardAgent):
 
     def _generate_delta(self, system: str, user: str) -> str:
         """Dedicated model call; no tools or action-policy history are sent."""
-        proposal = generate(
-            model=self.llm,
-            tools=None,
-            messages=[
+        proposal = self._generate_auxiliary(
+            [
                 SystemMessage(role="system", content=system),
                 UserMessage(role="user", content=user),
-            ],
-            # The delta updater is a dedicated Qwen reasoning pass. Its
-            # output remains constrained to a JSON delta, but it may use the
-            # model's hidden reasoning channel before emitting that proposal.
-            enable_think=True,
-            **self.llm_args,
+            ]
         )
         self._updater_thinking_trace = self._thinking_trace(proposal)
         return proposal.content or ""
@@ -874,51 +824,6 @@ class VitaRLStateDeltaAgent(VitaRLStandardAgent):
             canonical_state=empty_canonical_state(),
             state_metadata={},
             unresolved_evidence=bootstrap_evidence,
-        )
-
-    @staticmethod
-    def _observation(message: ValidAgentInputMessage) -> dict[str, Any]:
-        if isinstance(message, UserMessage):
-            return {"kind": "user", "content": message.content or ""}
-        tool_messages = (
-            message.tool_messages if isinstance(message, MultiToolMessage) else [message]
-        )
-        assert all(isinstance(tool_message, ToolMessage) for tool_message in tool_messages)
-        return {
-            "kind": "tool",
-            "results": [
-                {
-                    "id": tool_message.id,
-                    "name": tool_message.name,
-                    "content": tool_message.content or "",
-                    "error": tool_message.error,
-                }
-                for tool_message in tool_messages
-            ],
-        }
-
-    @staticmethod
-    def _action(message: AssistantMessage) -> dict[str, Any]:
-        return {
-            "content": message.content or "",
-            "tool_calls": [
-                {"id": call.id, "name": call.name, "arguments": call.arguments}
-                for call in (message.tool_calls or [])
-            ],
-        }
-
-    @classmethod
-    def _prompt_observation(cls, message: ValidAgentInputMessage) -> UserMessage:
-        """Expose one raw event to the action model without semantic parsing."""
-        observation = cls._observation(message)
-        if observation["kind"] == "user":
-            return UserMessage(role="user", content=observation["content"])
-        return UserMessage(
-            role="user",
-            content=(
-                "[LATEST TOOL OBSERVATION]\n"
-                + json.dumps(observation["results"], ensure_ascii=False, sort_keys=True)
-            ),
         )
 
     def _stop_decision(self, state: StateDeltaHarnessState, requested: bool) -> dict[str, Any]:
@@ -963,15 +868,12 @@ class VitaRLStateDeltaAgent(VitaRLStandardAgent):
         source = (state.state_metadata.get(f"/goals/{goal_id}/status") or {}).get("source_type")
         return source == "tool_observation" or (status == "cancelled" and source == "explicit_user")
 
-    @staticmethod
-    def _save_trace(record: dict[str, Any]) -> None:
+    @classmethod
+    def _save_trace(cls, record: dict[str, Any]) -> None:
         trace_path = os.environ.get("VITA_STATE_DELTA_TRACE_PATH")
         if not trace_path:
             return
-        path = Path(trace_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        cls._append_jsonl(trace_path, record)
 
     def generate_next_message(
         self, message: ValidAgentInputMessage, state: StateDeltaHarnessState
@@ -1002,10 +904,7 @@ class VitaRLStateDeltaAgent(VitaRLStandardAgent):
         state.state_metadata = update.metadata
         state.unresolved_evidence = update.unresolved_evidence
         state.turn = turn
-        if isinstance(message, MultiToolMessage):
-            state.messages.extend(message.tool_messages)
-        else:
-            state.messages.append(message)
+        self._append_event_to_transcript(state, message)
 
         leading_system = state.system_messages[0]
         action_system = SystemMessage(
@@ -1015,17 +914,11 @@ class VitaRLStateDeltaAgent(VitaRLStandardAgent):
                 observation=observation,
             ),
         )
-        assistant_message = generate(
-            model=self.llm,
-            tools=self.tools,
-            messages=[
+        assistant_message = self._generate_action(
+            [
                 action_system,
-                (
-                    self._prompt_observation(message)
-                ),
-            ],
-            enable_think=self.enable_think,
-            **self.llm_args,
+                self._prompt_observation(message),
+            ]
         )
         state.messages.append(assistant_message)
         action_thinking_trace = self._thinking_trace(assistant_message)
