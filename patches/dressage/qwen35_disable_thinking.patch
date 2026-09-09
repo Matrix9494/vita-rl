@@ -1,0 +1,16 @@
+diff --git a/dressage/proxy/server.py b/dressage/proxy/server.py
+index 0000000..0000000 100644
+--- a/dressage/proxy/server.py
++++ b/dressage/proxy/server.py
+@@ -967,4 +967,9 @@ def create_app(
+     )
+     tito_template_kwargs = (
+-        {"preserve_thinking": True} if token_build_mode == "tito" else None
++        # Qwen3.5 enables reasoning unless the chat template receives this
++        # explicit flag.  Dressage receives only tokenized requests, so carry
++        # it through every TITO render rather than relying on a client-side
++        # OpenAI ``chat_template_kwargs`` field that is no longer available.
++        {"preserve_thinking": True, "enable_thinking": False}
++        if token_build_mode == "tito"
++        else None
+     )
