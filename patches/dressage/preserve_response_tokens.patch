@@ -2,7 +2,7 @@ diff --git a/dressage/rollout/artifacts/samples.py b/dressage/rollout/artifacts/
 index 0000000..0000000 100644
 --- a/dressage/rollout/artifacts/samples.py
 +++ b/dressage/rollout/artifacts/samples.py
-@@ -302,14 +302,17 @@ def write_sample_from_segment(
+@@ -300,10 +300,13 @@ def write_sample_from_segment(
      token_cap = _segment_token_cap(args)
      truncated = token_cap is not None and origin_tokens_len > token_cap
      if truncated:
