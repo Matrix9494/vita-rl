@@ -23,7 +23,7 @@ git -C "$GORILLA_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
 }
 
 if [[ -n "$(git -C "$GORILLA_ROOT" status --porcelain)" ]]; then
-    if git -C "$GORILLA_ROOT" apply --unidiff-zero --reverse --check "$PATCH_FILE"; then
+    if git -C "$GORILLA_ROOT" apply --unidiff-zero --reverse --check "$PATCH_FILE" 2>/dev/null; then
         echo "BFCL Qwen adapter is already applied."
         exit 0
     fi
@@ -34,7 +34,7 @@ fi
 git -C "$GORILLA_ROOT" fetch --tags origin
 git -C "$GORILLA_ROOT" checkout --detach "$BFCL_COMMIT"
 
-if git -C "$GORILLA_ROOT" apply --unidiff-zero --reverse --check "$PATCH_FILE"; then
+if git -C "$GORILLA_ROOT" apply --unidiff-zero --reverse --check "$PATCH_FILE" 2>/dev/null; then
     echo "BFCL Qwen adapter is already applied."
 elif git -C "$GORILLA_ROOT" apply --unidiff-zero --check "$PATCH_FILE"; then
     git -C "$GORILLA_ROOT" apply --unidiff-zero "$PATCH_FILE"
