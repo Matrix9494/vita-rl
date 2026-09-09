@@ -1,0 +1,21 @@
+diff --git a/dressage/rollout/artifacts/samples.py b/dressage/rollout/artifacts/samples.py
+index 0000000..0000000 100644
+--- a/dressage/rollout/artifacts/samples.py
++++ b/dressage/rollout/artifacts/samples.py
+@@ -337,6 +337,15 @@ def write_sample_from_segment(
+     response_start = next(
+         (idx for idx, value in enumerate(full_loss_mask) if value == 1),
+         len(tokens),
+     )
++    # A suffix clipped exactly to the dynamic token cap can consist entirely
++    # of response tokens.  The policy then has no preceding token from which
++    # to predict its first retained response token; downstream log-prob
++    # extraction used a negative slice start and produced an empty vector.
++    # Keep the capped sequence valid by excluding that unscorable first token
++    # from the supervised response.  This preserves the remaining cap - 1
++    # response tokens and keeps every training field length-consistent.
++    if response_start == 0 and tokens:
++        response_start = 1
+     response_length = len(tokens) - response_start
+ 
+     sample.tokens = tokens

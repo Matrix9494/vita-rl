@@ -11,6 +11,7 @@ PATCH_FILES=(
   "$VITA_RL_ROOT/patches/dressage/qwen35_tito_match_served_template.patch"
   "$VITA_RL_ROOT/patches/dressage/sglang_direct_parser_fallback.patch"
   "$VITA_RL_ROOT/patches/dressage/align_rollout_metric_lengths.patch"
+  "$VITA_RL_ROOT/patches/dressage/preserve_response_prefix_token.patch"
 )
 
 [[ -d "$DRESSAGE_ROOT/.git" ]] || {
