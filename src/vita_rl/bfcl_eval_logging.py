@@ -27,15 +27,29 @@ def log_eval_rollout_data(
     if not destination:
         return False
 
-    rewards = [_reward(item) for item in data]
+    datasets = data if isinstance(data, dict) else {}
+    heldout = datasets.get("bfcl-heldout", {})
+    raw_rewards = heldout.get("rewards", []) if isinstance(heldout, dict) else []
+    rewards = [_reward(item) for item in raw_rewards]
+    samples = heldout.get("samples", []) if isinstance(heldout, dict) else []
+    task_outcomes = []
+    for index, reward in enumerate(rewards):
+        sample = samples[index] if index < len(samples) else None
+        metadata = getattr(sample, "metadata", {}) if sample is not None else {}
+        task_outcomes.append(
+            {
+                "task_id": metadata.get("task_id") if isinstance(metadata, dict) else None,
+                "terminal_reward": reward,
+            }
+        )
     numeric_rewards = [reward for reward in rewards if reward is not None]
     record = {
         "rollout_id": int(rollout_id),
-        "num_tasks": len(data),
+        "num_tasks": len(rewards),
         "mean_terminal_reward": (
             sum(numeric_rewards) / len(numeric_rewards) if numeric_rewards else 0.0
         ),
-        "terminal_rewards": rewards,
+        "task_outcomes": task_outcomes,
         "extra_metrics": extra_metrics,
     }
     path = Path(destination)
