@@ -17,6 +17,7 @@ index 0000000..0000000 100644
 +        workers.append(SGLangWorkerInfo(url=self._router_url, is_healthy=True))
  
          headers = {}
+         if routing_key:
 @@ -617,9 +621,12 @@
              return None
  
@@ -31,3 +32,4 @@ index 0000000..0000000 100644
 +        workers.append(SGLangWorkerInfo(url=self._router_url, is_healthy=True))
  
          headers = {}
+         if routing_key:
