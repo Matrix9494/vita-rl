@@ -10,6 +10,7 @@ PATCH_FILES=(
   "$VITA_RL_ROOT/patches/dressage/qwen35_disable_thinking.patch"
   "$VITA_RL_ROOT/patches/dressage/qwen35_tito_match_served_template.patch"
   "$VITA_RL_ROOT/patches/dressage/sglang_direct_parser_fallback.patch"
+  "$VITA_RL_ROOT/patches/dressage/align_rollout_metric_lengths.patch"
 )
 
 [[ -d "$DRESSAGE_ROOT/.git" ]] || {
