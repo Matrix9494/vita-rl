@@ -2,7 +2,7 @@ diff --git a/dressage/proxy/tito/templates/qwen3_5_fixed.jinja b/dressage/proxy/
 index 0000000..0000000 100644
 --- a/dressage/proxy/tito/templates/qwen3_5_fixed.jinja
 +++ b/dressage/proxy/tito/templates/qwen3_5_fixed.jinja
-@@ -46,4 +46,4 @@
+@@ -36,4 +36,4 @@
          {{- tool | tojson }}
      {%- endfor %}
      {{- "\n</tools>" }}
