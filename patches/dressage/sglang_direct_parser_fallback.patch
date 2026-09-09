@@ -2,7 +2,7 @@ diff --git a/dressage/proxy/sglang_client.py b/dressage/proxy/sglang_client.py
 index 0000000..0000000 100644
 --- a/dressage/proxy/sglang_client.py
 +++ b/dressage/proxy/sglang_client.py
-@@ -563,9 +563,13 @@
+@@ -563,9 +563,17 @@
              return None
  
          try:
@@ -14,11 +14,15 @@ index 0000000..0000000 100644
 +        # A single SGLang server exposes parser endpoints itself but not the
 +        # router-only /workers endpoint. Use it as a final parser target so
 +        # the native schema-aware parser remains available in that topology.
-+        workers.append(SGLangWorkerInfo(url=self._router_url, is_healthy=True))
++        workers.append(
++            SGLangWorkerInfo(
++                url=self._router_url, is_healthy=True, connection_mode="http"
++            )
++        )
  
          headers = {}
          if routing_key:
-@@ -617,9 +621,12 @@
+@@ -617,9 +625,16 @@
              return None
  
          try:
@@ -29,7 +33,11 @@ index 0000000..0000000 100644
 +            workers = []
 +        # See parse_function_call: direct SGLang deployments do not expose
 +        # /workers but do expose /separate_reasoning.
-+        workers.append(SGLangWorkerInfo(url=self._router_url, is_healthy=True))
++        workers.append(
++            SGLangWorkerInfo(
++                url=self._router_url, is_healthy=True, connection_mode="http"
++            )
++        )
  
          headers = {}
          if routing_key:
