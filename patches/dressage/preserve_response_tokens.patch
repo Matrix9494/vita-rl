@@ -1,0 +1,25 @@
+diff --git a/dressage/rollout/artifacts/samples.py b/dressage/rollout/artifacts/samples.py
+index 0000000..0000000 100644
+--- a/dressage/rollout/artifacts/samples.py
++++ b/dressage/rollout/artifacts/samples.py
+@@ -302,14 +302,17 @@ def write_sample_from_segment(
+     token_cap = _segment_token_cap(args)
+     truncated = token_cap is not None and origin_tokens_len > token_cap
+     if truncated:
+-        tokens = tokens[:token_cap]
+-        full_loss_mask = full_loss_mask[:token_cap]
++        # A trajectory's generated assistant turn lives at the end of the
++        # token stream.  Retain that suffix so a long full-history context
++        # remains trainable under the dynamic-batch token cap.
++        start = origin_tokens_len - token_cap
++        tokens = tokens[start:]
++        full_loss_mask = full_loss_mask[start:]
+         if isinstance(full_logprobs, list):
+-            full_logprobs = full_logprobs[:token_cap]
++            full_logprobs = full_logprobs[start:]
+         if full_versions is not None:
+-            full_versions = full_versions[:token_cap]
++            full_versions = full_versions[start:]
+         logger.warning(
+             "segment truncated for session_id=%s, instance_id=%s, segment_index=%s: %s > %s",
+             session_id,

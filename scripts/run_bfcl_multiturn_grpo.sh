@@ -39,6 +39,7 @@ trap cleanup EXIT
 
 echo "[1/8] BFCL checkout and deterministic manifests"
 bash "$VITA_RL_ROOT/scripts/setup_bfcl_harness.sh"
+bash "$VITA_RL_ROOT/scripts/setup_dressage_rollout.sh"
 PYTHONPATH="$VITA_RL_ROOT/src:$BFCL_ROOT" "$VITA_VENV/bin/python" "$VITA_RL_ROOT/scripts/build_bfcl_grpo_manifests.py" --train-output "$PROMPT_DATA" --eval-output "$EVAL_PROMPT_DATA" --bfcl-source-root "$BFCL_ROOT" | tee "$LOG_DIR/manifest.log"
 
 echo "[2/8] BFCL runtime dependency check"
