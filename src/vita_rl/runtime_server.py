@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
@@ -12,6 +13,11 @@ from vita_rl.environments import tool_environment_registry
 
 
 logger = logging.getLogger(__name__)
+
+
+def _json_safe(value: Any) -> Any:
+    """Keep runtime diagnostics serializable without changing environment reward."""
+    return json.loads(json.dumps(value, default=str))
 
 
 class EpisodeValidationError(ValueError):
@@ -205,8 +211,8 @@ def run_environment_episode(request: EpisodeRequest) -> EpisodeResponse:
             "num_tool_calls": result.num_tool_calls,
             "num_tool_errors": result.num_tool_errors,
             "user_events": result.user_events,
-            "evaluation": result.evaluation,
-            "messages": result.messages,
+            "evaluation": _json_safe(result.evaluation),
+            "messages": _json_safe(result.messages),
         },
         final_assistant_response=result.final_assistant_response,
     )

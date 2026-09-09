@@ -107,7 +107,10 @@ async def _evaluate_dataset(args: Any, dataset_cfg: Any) -> dict[str, dict[str, 
     samples = []
     for task in asyncio.as_completed(tasks):
         result = await task
-        samples.extend(result if isinstance(result, list) else [result])
+        # Dressage returns prefix-chain segments for an agent trajectory.  BFCL
+        # reward is defined only for the completed terminal episode, so retain
+        # its final segment rather than scoring intermediate prefixes.
+        samples.append(result[-1] if isinstance(result, list) else result)
     samples.sort(key=lambda sample: sample.index)
     # A transport/runtime failure yields Dressage's aborted sample rather than
     # a reward.  Treat that failed episode as the only valid terminal fallback
