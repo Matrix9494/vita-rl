@@ -109,6 +109,13 @@ async def _evaluate_dataset(args: Any, dataset_cfg: Any) -> dict[str, dict[str, 
         result = await task
         samples.extend(result if isinstance(result, list) else [result])
     samples.sort(key=lambda sample: sample.index)
+    # A transport/runtime failure yields Dressage's aborted sample rather than
+    # a reward.  Treat that failed episode as the only valid terminal fallback
+    # (zero); this keeps the evaluator's reward vector strictly binary and
+    # prevents one failed request from invalidating all held-out metrics.
+    for sample in samples:
+        if sample.reward is None:
+            sample.reward = 0.0
     reward_key = args.eval_reward_key or args.reward_key
     return {
         dataset_cfg.name: {
