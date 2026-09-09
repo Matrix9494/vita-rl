@@ -1,0 +1,55 @@
+diff --git a/slime/slime/backends/megatron_utils/data.py b/slime/slime/backends/megatron_utils/data.py
+index 0000000..0000000 100644
+--- a/slime/slime/backends/megatron_utils/data.py
++++ b/slime/slime/backends/megatron_utils/data.py
+@@ -304,12 +304,35 @@ def log_rollout_data(
+                         "opd_reverse_kl",
+                     ]:
+                         tensor = torch.cat(val).clone().detach()
++                        # Dynamic token packing can omit a fully truncated
++                        # segment from a forward output (zero log-prob
++                        # tokens), while the original rollout metadata still
++                        # records its pre-pack response length.  The metric
++                        # reducer must split by the tensor lengths actually
++                        # returned by the forward pass; otherwise a logging
++                        # only mismatch aborts an otherwise valid GRPO step.
++                        metric_response_lengths = [int(item.numel()) for item in val]
++                        metric_loss_masks = loss_masks
++                        metric_total_lengths = total_lengths
++                        if metric_response_lengths != response_lengths:
++                            logger.warning(
++                                "Aligning rollout metric lengths with forward outputs: "
++                                "metadata=%s tensor=%s",
++                                sum(response_lengths),
++                                sum(metric_response_lengths),
++                            )
++                            metric_loss_masks = [
++                                loss_mask[:length]
++                                for loss_mask, length in zip(
++                                    loss_masks, metric_response_lengths, strict=False
++                                )
++                            ]
++                            metric_total_lengths = [
++                                total_length - response_length + metric_length
++                                for total_length, response_length, metric_length in zip(
++                                    total_lengths,
++                                    response_lengths,
++                                    metric_response_lengths,
++                                    strict=False,
++                                )
++                            ]
+                         sum_of_sample_mean = get_sum_of_sample_mean(
+-                            total_lengths,
+-                            response_lengths,
+-                            loss_masks,
++                            metric_total_lengths,
++                            metric_response_lengths,
++                            metric_loss_masks,
+                             rollout_mask_sums,
+                         )
+*** Update File: /u/dz13/vita-rl/scripts/setup_dressage_rollout.sh
+@@
+   "$VITA_RL_ROOT/patches/dressage/qwen35_tito_match_served_template.patch"
+   "$VITA_RL_ROOT/patches/dressage/sglang_direct_parser_fallback.patch"
++  "$VITA_RL_ROOT/patches/dressage/align_rollout_metric_lengths.patch"
+ )
