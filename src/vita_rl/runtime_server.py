@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from vita_rl.environment_runner import OpenAICompatibleGenerator, run_tool_environment_episode
 from vita_rl.environments import tool_environment_registry
+
+
+logger = logging.getLogger(__name__)
 
 
 class EpisodeValidationError(ValueError):
@@ -227,6 +231,7 @@ def create_app(runner: Callable[[EpisodeRequest], EpisodeResponse] | None = None
         except EpisodeValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as exc:
+            logger.exception("environment episode execution failed")
             raise HTTPException(status_code=500, detail="environment episode execution failed") from exc
 
     return app
