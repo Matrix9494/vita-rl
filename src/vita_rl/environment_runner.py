@@ -184,6 +184,7 @@ def run_tool_environment_episode(
     final_response = ""
     termination_reason = "max_steps"
     pending_user_events: list[dict[str, Any]] = []
+    observed_user_events: list[dict[str, Any]] = []
 
     for agent_turn in range(1, max_steps + 1):
         assistant, state = agent.generate_next_message(incoming, state)
@@ -196,6 +197,7 @@ def run_tool_environment_episode(
             pending_user_events.extend(env.next_user_event(agent_turn=agent_turn))
             if pending_user_events:
                 event = pending_user_events.pop(0)
+                observed_user_events.append(event)
                 incoming = protocol.UserMessage(role="user", content=event["message"])
                 continue
             termination_reason = "agent_stop" if agent.is_stop(assistant) else "assistant_final"
@@ -234,7 +236,10 @@ def run_tool_environment_episode(
         num_agent_turns=len([message for message in state.messages if isinstance(message, protocol.AssistantMessage)]),
         num_tool_calls=num_tool_calls,
         num_tool_errors=num_tool_errors,
-        user_events=list(evaluation.state["interaction"]["user_events"]),
+        # The native BFCL checker exposes a compact checker state rather than
+        # VitaBench's ``state["interaction"]`` audit object.  The runner owns
+        # user-event delivery, so retain that neutral audit trail directly.
+        user_events=observed_user_events,
         final_assistant_response=final_response,
         evaluation=evaluation.to_dict(),
         messages=messages,
