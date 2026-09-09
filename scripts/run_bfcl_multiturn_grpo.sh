@@ -42,7 +42,7 @@ bash "$VITA_RL_ROOT/scripts/setup_bfcl_harness.sh"
 PYTHONPATH="$VITA_RL_ROOT/src:$BFCL_ROOT" "$VITA_VENV/bin/python" "$VITA_RL_ROOT/scripts/build_bfcl_grpo_manifests.py" --train-output "$PROMPT_DATA" --eval-output "$EVAL_PROMPT_DATA" --bfcl-source-root "$BFCL_ROOT" | tee "$LOG_DIR/manifest.log"
 
 echo "[2/8] BFCL runtime dependency check"
-PYTHONPATH="$VITA_RL_ROOT/src:$BFCL_ROOT" "$VITA_VENV/bin/python" -c 'import bfcl_eval; from bfcl_eval.eval_checker.multi_turn_eval import multi_turn_checker; import mpmath, overrides, openai, tenacity'
+PYTHONPATH="$VITA_RL_ROOT/src:$BFCL_ROOT" "$VITA_VENV/bin/python" -c 'import bfcl_eval; from bfcl_eval.eval_checker.multi_turn_eval import multi_turn_checker; from bfcl_eval.model_handler.utils import convert_to_tool; import mpmath, overrides, openai, tenacity, tree_sitter, tree_sitter_java, tree_sitter_javascript'
 
 echo "[3/8] stop interactive inference and convert reference"
 RUNTIME_DIR=/root/.vita_rl_runtime
