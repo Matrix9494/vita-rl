@@ -139,6 +139,88 @@ assert all(episode.num_agent_turns <= 100 for episode in result.episodes)
     assert completed.returncode == 0, completed.stderr or completed.stdout
 
 
+def test_bfcl_keeps_all_tool_substeps_in_the_current_user_turn():
+    """Match BFCL's native ``while True`` execution for one fixed task.
+
+    The official checker groups all calls made before an empty model response
+    under the same user turn.  This guards against advancing the adapter after
+    every tool result, which would silently make correct trajectories fail.
+    """
+    repository = Path(__file__).parents[1]
+    script = r'''
+import ast
+from vita_rl import harness_protocol
+from vita_rl.bfcl_environment import BFCLMultiTurnBaseEnvironment
+from vita_rl.environment_runner import run_tool_environment_episode
+
+env = BFCLMultiTurnBaseEnvironment()
+env.reset("multi_turn_base_0")
+ground_truth = env._ground_truth["multi_turn_base_0"]
+
+def decode(call):
+    node = ast.parse(call, mode="eval").body
+    assert isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    return node.func.id, {
+        keyword.arg: ast.literal_eval(keyword.value)
+        for keyword in node.keywords
+    }
+
+class GroundTruthGenerator:
+    def __init__(self):
+        self.actions = [
+            action
+            for user_turn in ground_truth
+            for action in ([(decode(call)) for call in user_turn] + [None])
+        ]
+        self.index = 0
+
+    def __call__(self, **_kwargs):
+        action = self.actions[self.index]
+        self.index += 1
+        if action is None:
+            return harness_protocol.AssistantMessage(role="assistant", content="done")
+        name, arguments = action
+        return harness_protocol.AssistantMessage(
+            role="assistant",
+            tool_calls=[harness_protocol.ToolCall(
+                id=f"call-{self.index}", name=name, arguments=arguments
+            )],
+        )
+
+result = run_tool_environment_episode(
+    environment_name="bfcl-multi-turn-base",
+    task_id="multi_turn_base_0",
+    harness_name="vita_rl_standard",
+    model="scripted",
+    generate_fn=GroundTruthGenerator(),
+    max_steps=20,
+)
+assert result.success, result.evaluation
+assert result.reward == 1.0
+assert [event["event_id"] for event in result.user_events] == [
+    "multi_turn_base_0:user_turn:1",
+    "multi_turn_base_0:user_turn:2",
+    "multi_turn_base_0:user_turn:3",
+]
+assert result.evaluation["state"]["model_calls"] == [
+    [[call] for call in user_turn] for user_turn in ground_truth
+]
+'''
+    environment = dict(os.environ)
+    environment["VITA_RL_PROTOCOL"] = "mini"
+    environment["PYTHONPATH"] = os.pathsep.join(
+        [
+            str(repository / "src"),
+            str(repository / "external" / "gorilla" / "berkeley-function-call-leaderboard"),
+        ]
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script], cwd=repository, env=environment,
+        text=True, capture_output=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
 def test_openai_generator_explicitly_disables_qwen_thinking_when_requested():
     repository = Path(__file__).parents[1]
     script = r'''

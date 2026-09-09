@@ -207,9 +207,15 @@ def run_tool_environment_episode(
             num_tool_calls += 1
             result = env.call_tool(call.name, call.arguments)
             num_tool_errors += int(not result.ok)
-            pending_user_events.extend(
-                env.next_user_event(tool_name=call.name, tool_success=result.ok)
-            )
+            # Legacy/procedural environments can reveal a user event as soon
+            # as a tool succeeds.  BFCL is different: native BFCL execution
+            # completes all tool/model substeps for one user request before
+            # moving to the next request.  Advancing its turn here records
+            # later calls in the wrong checker bucket and collapses reward.
+            if getattr(env, "user_events_after_tool_calls", True):
+                pending_user_events.extend(
+                    env.next_user_event(tool_name=call.name, tool_success=result.ok)
+                )
             tool_messages.append(
                 protocol.ToolMessage(
                     role="tool",

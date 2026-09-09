@@ -110,6 +110,13 @@ def bfcl_task_splits(
 class BFCLMultiTurnBaseEnvironment:
     """One official BFCL multi-turn task using its native executors."""
 
+    # BFCL advances from one user request to the next only after the model
+    # returns an empty function-call response.  In particular, a request can
+    # contain several function calls and several model/tool round trips.  The
+    # generic runner must therefore not ask BFCL for a user event after every
+    # individual tool result (as vita-mini legitimately does).
+    user_events_after_tool_calls = False
+
     def __init__(self, *, source_root: Path | None = None) -> None:
         self._entries, self._ground_truth = load_bfcl_multi_turn_base(
             source_root=source_root
