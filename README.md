@@ -7,6 +7,8 @@ environments.
 
 - **vita-mini** is the first self-contained deterministic environment under
   `external/`; it requires neither GPT user simulation nor LLM evaluation.
+- **memory_1** is a standalone Gymnasium-style delayed-recall environment
+  under `external/`, with `reset`/`step` rather than a tool-use transcript.
 - **VitaBench** remains an optional legacy benchmark backend at
   `external/vitabench`.
 - **SGLang** is the inference backend serving the local Qwen model on
@@ -106,3 +108,21 @@ Start the runtime with `python -m vita_rl.runtime_server` and point Dressage
 at it with `ENVIRONMENT_RUNTIME_URL`. The Vessl smoke launcher is
 `scripts/run_environment_grpo_smoke.sh`; set `ENVIRONMENT=vita-mini` to avoid
 the VitaBench-only OpenRouter user/evaluator relay.
+
+## Procedural vita-mini evaluation
+
+To run five independently generated, replayable delivery environments with the
+summary harness retaining the last three completed interaction turns (`k=3`):
+
+```bash
+PYTHONPATH=src:external/vita-mini/src VITA_RL_PROTOCOL=mini \
+  .venv-eval/bin/python -m vita_rl.environment_runner \
+  --environment vita-mini --num-environments 5 --generation-seed 20260908 \
+  --harness vita_rl_summary --summary-window-size 3 --max-steps 100 \
+  --max-concurrency 30 \
+  --model /u/dz13/vita-rl/models/Qwen3.5-4B \
+  --output outputs/vita_mini_summary_k3_eval.json
+```
+
+The output records its generation seed and every `generated:<seed>` task ID;
+pass any one of those IDs with `--task-id` to reproduce an individual episode.

@@ -16,4 +16,4 @@ dependencies = []
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "external/vita-mini/src"]
+pythonpath = ["src", "external/vita-mini/src", "external/memory_1/src"]

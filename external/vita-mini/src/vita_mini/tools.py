@@ -13,6 +13,7 @@ class ToolError(ValueError):
 
 
 def _schema(name: str, description: str, properties: dict[str, Any], required: tuple[str, ...] = ()) -> dict[str, Any]:
+    """Return one OpenAI function schema for a vita-mini API."""
     return {"type": "function", "function": {"name": name, "description": description, "parameters": {
         "type": "object", "properties": properties, "required": list(required), "additionalProperties": False,
     }}}
@@ -39,16 +40,50 @@ class DeliveryTools:
     def schemas(self) -> list[dict[str, Any]]:
         string = {"type": "string"}
         positive = {"type": "integer", "minimum": 1}
+        location_values = sorted({*self.database.locations, *self.database.locations.values()})
+        address = {
+            **string,
+            "enum": location_values,
+            "description": "A saved delivery location. Use the location name from the user request, such as 'home' or 'office'.",
+        }
+        delivery_time = {
+            **string,
+            "pattern": r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$",
+            "description": (
+                "Full local timestamp in YYYY-MM-DD HH:MM:SS format. It must be strictly after "
+                f"the current logical time ({self.database.current_time})."
+            ),
+        }
         return [
-            _schema("search_stores", "Search delivery stores by words in their name or tags.", {"query": {**string, "minLength": 1}}, ("query",)),
-            _schema("search_products", "Search products by words in product name or tags. Optionally restrict to one store.", {"query": {**string, "minLength": 1}, "store_id": string}, ("query",)),
-            _schema("get_store", "Get one store's details and product identifiers.", {"store_id": string}, ("store_id",)),
-            _schema("get_product", "Get one product's details, tags, price, and current inventory.", {"product_id": string}, ("product_id",)),
-            _schema("create_order", "Create one unpaid delivery order. Product, store, quantity, address, and delivery time must be explicit.", {"store_id": string, "product_id": string, "quantity": positive, "address": {**string, "minLength": 1}, "delivery_time": {**string, "minLength": 1}}, ("store_id", "product_id", "quantity", "address", "delivery_time")),
-            _schema("modify_order", "Modify an existing unpaid order. Supply at least one field to change.", {"order_id": string, "product_id": string, "quantity": positive, "address": {**string, "minLength": 1}, "delivery_time": {**string, "minLength": 1}}, ("order_id",)),
-            _schema("cancel_order", "Cancel an existing unpaid or paid order and restore inventory.", {"order_id": string}, ("order_id",)),
-            _schema("pay_order", "Pay an existing unpaid order after checking its final details.", {"order_id": string}, ("order_id",)),
-            _schema("get_order", "Get one of the active user's orders.", {"order_id": string}, ("order_id",)),
+            _schema(
+                "search_stores",
+                "Search store names and tags only. This does not search product inventory; use search_products to find an item.",
+                {"query": {**string, "minLength": 1}},
+                ("query",),
+            ),
+            _schema(
+                "search_products",
+                "Search available products by product name or tags. Results include product_id, store_id, price, tags, and inventory for creating an order.",
+                {"query": {**string, "minLength": 1}, "store_id": string},
+                ("query",),
+            ),
+            _schema("get_store", "Get one store's details and product identifiers. Obtain store_id from a product or store-search result.", {"store_id": string}, ("store_id",)),
+            _schema("get_product", "Get one product's details, tags, price, and current inventory. Obtain product_id from a product-search or store result.", {"product_id": string}, ("product_id",)),
+            _schema(
+                "create_order",
+                "Create one unpaid delivery order. Obtain store_id and product_id from search_products; use the user-requested saved location and a valid future delivery_time.",
+                {"store_id": string, "product_id": string, "quantity": positive, "address": address, "delivery_time": delivery_time},
+                ("store_id", "product_id", "quantity", "address", "delivery_time"),
+            ),
+            _schema(
+                "modify_order",
+                "Modify an existing unpaid order. The order_id is returned by create_order; any replacement product_id must belong to the order's current store.",
+                {"order_id": string, "product_id": string, "quantity": positive, "address": address, "delivery_time": delivery_time},
+                ("order_id",),
+            ),
+            _schema("cancel_order", "Cancel an existing unpaid or paid order and restore inventory. Obtain order_id from create_order or get_order.", {"order_id": string}, ("order_id",)),
+            _schema("pay_order", "Pay an existing unpaid order. Obtain order_id from create_order or get_order after final modifications.", {"order_id": string}, ("order_id",)),
+            _schema("get_order", "Get one of the active user's orders. Obtain order_id from create_order.", {"order_id": string}, ("order_id",)),
         ]
 
     def invoke(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -86,7 +121,7 @@ class DeliveryTools:
         self._set_inventory(product_id, product.inventory - quantity)
         order = DeliveryOrder(
             order_id=f"mini-order-{self.database.next_order_number:04d}", user_id=self.user_id,
-            store_id=store_id, product_id=product_id, quantity=quantity, address=address.strip(),
+            store_id=store_id, product_id=product_id, quantity=quantity, address=self._address_key(address),
             delivery_time=delivery_time.strip(), total_cents=product.price_cents * quantity, status="unpaid",
         )
         self.database.next_order_number += 1
@@ -111,7 +146,7 @@ class DeliveryTools:
             raise
         if address is not None:
             self._validate_address_time(address, order.delivery_time)
-            order.address = address.strip()
+            order.address = self._address_key(address)
         if delivery_time is not None:
             self._validate_address_time(order.address, delivery_time)
             order.delivery_time = delivery_time.strip()
@@ -151,7 +186,7 @@ class DeliveryTools:
         return product
 
     def _validate_address_time(self, address: str, delivery_time: str) -> None:
-        if not isinstance(address, str) or address.strip() not in self.database.locations:
+        if not isinstance(address, str) or self._address_key(address) not in self.database.locations:
             raise ToolError("address must be one of the known location names")
         if not isinstance(delivery_time, str) or delivery_time <= self.database.current_time:
             raise ToolError("delivery_time must be after the current logical time")
@@ -189,6 +224,17 @@ class DeliveryTools:
     @staticmethod
     def _order_view(order: DeliveryOrder) -> dict[str, Any]:
         return asdict(order)
+
+    def _address_key(self, address: str) -> str:
+        if not isinstance(address, str):
+            raise ToolError("address must be a string")
+        candidate = address.strip()
+        if candidate in self.database.locations:
+            return candidate
+        for key, value in self.database.locations.items():
+            if candidate == value:
+                return key
+        raise ToolError("address must be one of the known location names or values")
 
 
 def _words(text: str) -> set[str]:

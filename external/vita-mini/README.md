@@ -17,10 +17,23 @@ The agent sees only user messages, tool schemas, and tool results. The
 database, latent task constraints, unrevealed preferences, revision history,
 and evaluator state remain hidden.
 
-The delivery API exposed through `env.openai_tools()` is:
+The delivery API exposed through `env.openai_tools()` is fixed for the whole
+episode and is available from the first agent turn, matching VitaBench's
+exposure timing. It contains only vita-mini's nine stateful tools:
 
 - `search_stores`, `search_products`, `get_store`, `get_product`
 - `create_order`, `modify_order`, `cancel_order`, `pay_order`, `get_order`
+
+The API names and arguments are part of vita-mini's task definition; no
+VitaBench-only aliases or unrelated domain APIs are injected.
+
+Every required action is discoverable from a user message, a schema, or an
+earlier tool result. In particular, product search results provide the product
+and store identifiers used by `create_order`; order creation returns the
+identifier used by `modify_order`, `pay_order`, `cancel_order`, and
+`get_order`. Each episode's `address` schema lists its valid saved locations,
+and `delivery_time` requires `YYYY-MM-DD HH:MM:SS` strictly after the displayed
+logical time. If no delivery time is requested, the agent should choose one.
 
 `env.call_tool(name, arguments)` returns a JSON-safe `ToolResult`; invalid
 calls are structured agent-visible errors rather than Python tracebacks.
@@ -52,6 +65,29 @@ configuration records the requested number of constraints, objectives,
 revisions, distractors, tools, and horizon/retention targets. Use
 `vita_mini.oracle.verify_oracle_solution(task)` before accepting generated
 tasks in a dataset pipeline.
+
+The stable `delivery_revision` fixture is intentionally a single cold-brew
+example. In contrast, procedural `generated:<seed>` tasks sample five product
+domains (beverages, meals, and dietary substitutions), four saved delivery
+locations, varied quantities and stores, and one of four action graphs:
+cancel-and-replace, in-place line modification, direct ordering with a final
+address change, or delivery rescheduling. The default suite has four
+distractor stores, a same-name dietary-violating product decoy, and two
+separated revisions in its standard non-replacement graphs. Seeds therefore
+change the task semantics and required tool trajectory, not just prices or
+identifiers.
+
+The generator also samples three delayed-commitment memory families. They
+disclose persistent requirements (quantity, dietary constraints, and/or a
+budget) before any order exists; later events select the product and provide
+delivery details without repeating the earlier requirements. The decisive
+`create_order` must therefore combine information from several user events,
+not recover it from an existing order. Each generated task records internal
+`metadata.memory_requirements`, including disclosure/use event IDs,
+persistence or supersession, the required `create_order` action, database
+recoverability before use, and an event-level retention distance. This
+metadata appears in executor snapshots as `task_metadata` but is never shown
+to the agent.
 
 ## Running through the shared harnesses
 

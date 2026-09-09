@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import asdict
 from typing import Any
 
-from .generator import built_in_tasks
+from .generator import TaskGenerator, built_in_tasks
 from .tasks import Constraint, MiniTask, UserEvent
 from .tools import DeliveryTools, ToolError
 from .types import EnvironmentState, EvaluationResult, InteractionState, ToolResult, UserState
@@ -27,7 +27,13 @@ class MiniEnvironment:
         try:
             self._task = self._tasks[task_id]
         except KeyError as exc:
-            raise ValueError(f"Unknown task {task_id!r}; available: {', '.join(sorted(self._tasks))}") from exc
+            seed = self._procedural_seed(task_id)
+            if seed is None:
+                raise ValueError(
+                    f"Unknown task {task_id!r}; available: {', '.join(sorted(self._tasks))}; "
+                    "procedural tasks use generated:<integer-seed>"
+                ) from exc
+            self._task = TaskGenerator(seed=seed).generate(task_id)
         database = deepcopy(self._task.initial_state)
         latent = {constraint.constraint_id: constraint.expected for constraint in self._task.latent_constraints}
         self._state = EnvironmentState(
@@ -51,6 +57,10 @@ Complete the user's currently stated requests using tools. Information can be
 revealed or revised later, so treat newer user instructions as superseding
 earlier preferences. Tool-confirmed data is authoritative. Before a final
 answer, inspect and pay or cancel orders only when the user has requested it.
+Never end with a plan or promise to use a tool: make the needed tool call in
+the same turn. Do not ask for a value the user has already provided or that a
+tool schema provides. If the user gives no delivery time, choose a valid future
+timestamp using the current logical time and the delivery_time schema.
 
 Current logical time: {time}"""
 
@@ -124,11 +134,25 @@ Current logical time: {time}"""
             },
             "user": _json(state.user),
             "interaction": _json(state.interaction),
+            "task_metadata": deepcopy(self._require_task().metadata),
         }
 
     @staticmethod
     def tasks() -> list[dict[str, Any]]:
         return [{"task_id": task_id} for task_id in sorted(built_in_tasks())]
+
+    @staticmethod
+    def _procedural_seed(task_id: str) -> int | None:
+        """Return a seed for the documented ``generated:<seed>`` task form."""
+        prefix = "generated:"
+        if not task_id.startswith(prefix):
+            return None
+        try:
+            return int(task_id[len(prefix):])
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid procedural task ID {task_id!r}; expected generated:<integer-seed>"
+            ) from exc
 
     def _constraint_met(self, constraint: Constraint) -> bool:
         state = self._require_state()
@@ -155,6 +179,11 @@ Current logical time: {time}"""
         raise ValueError(f"Unsupported constraint field {constraint.field!r}")
 
     def _event_matches(self, event: UserEvent, agent_turn: int, tool_name: str | None, tool_success: bool | None) -> bool:
+        interaction = self._require_state().interaction
+        if event.after_event_id and event.after_event_id not in interaction.fired_event_ids:
+            return False
+        if event.min_tool_calls is not None and interaction.tool_calls < event.min_tool_calls:
+            return False
         if event.trigger == "after_agent_turn":
             return agent_turn >= (event.after_turn or 1)
         if event.trigger == "after_tool":

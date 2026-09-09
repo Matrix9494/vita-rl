@@ -20,6 +20,8 @@ class UserEvent:
     tool_name: str | None = None
     revision_of: str | None = None
     updates: dict[str, Any] = field(default_factory=dict)
+    after_event_id: str | None = None
+    min_tool_calls: int | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,7 @@ class MiniTask:
     user_script: tuple[UserEvent, ...]
     difficulty: dict[str, int]
     oracle_solution: tuple[dict[str, Any], ...]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def initial_message(self) -> str:

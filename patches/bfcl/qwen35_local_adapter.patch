@@ -1,0 +1,122 @@
+diff --git a/berkeley-function-call-leaderboard/bfcl_eval/constants/model_config.py b/berkeley-function-call-leaderboard/bfcl_eval/constants/model_config.py
+index e42fe1c..d657895 100644
+--- a/berkeley-function-call-leaderboard/bfcl_eval/constants/model_config.py
++++ b/berkeley-function-call-leaderboard/bfcl_eval/constants/model_config.py
+@@ -26,0 +27 @@ from bfcl_eval.model_handler.api_inference.openai_response import OpenAIResponsesHandler
++from bfcl_eval.model_handler.api_inference.qwen35_local import Qwen35LocalFCHandler
+@@ -119,0 +121,14 @@ api_inference_model_map = {
++    # Local project checkpoint, served by the Slurm launcher with SGLang.  The
++    # adapter retains BFCL's native function-calling and agentic evaluation loop.
++    "qwen35-4b-local-FC": ModelConfig(
++        model_name="qwen35-4b-local",
++        display_name="Qwen3.5-4B (Local FC)",
++        url="https://huggingface.co/Qwen",
++        org="Qwen",
++        license="Apache-2.0",
++        model_handler=Qwen35LocalFCHandler,
++        input_price=None,
++        output_price=None,
++        is_fc_model=True,
++        underscore_to_dot=False,
++    ),
+diff --git a/berkeley-function-call-leaderboard/bfcl_eval/model_handler/api_inference/qwen35_local.py b/berkeley-function-call-leaderboard/bfcl_eval/model_handler/api_inference/qwen35_local.py
+new file mode 100644
+--- /dev/null
++++ b/berkeley-function-call-leaderboard/bfcl_eval/model_handler/api_inference/qwen35_local.py
+@@ -0,0 +1,96 @@
++"""BFCL adapter for the locally served Qwen3.5 checkpoint.
++
++The benchmark's normal OpenAI function-calling loop is retained.  This adapter
++only supplies the local endpoint and Qwen's thinking/template options, while
++also preserving Qwen's reasoning field in its subsequent-turn history.
++"""
++
++import json
++import os
++import threading
++from pathlib import Path
++from typing import Any
++
++from bfcl_eval.model_handler.api_inference.openai_completion import (
++    OpenAICompletionsHandler,
++)
++
++
++_TRACE_LOCK = threading.Lock()
++
++
++class Qwen35LocalFCHandler(OpenAICompletionsHandler):
++    """Use a pre-existing SGLang OpenAI-compatible Qwen3.5 FC endpoint."""
++
++    @staticmethod
++    def _thinking_enabled() -> bool:
++        """Read a run-level thinking switch without changing normal defaults."""
++        return os.getenv("BFCL_QWEN_ENABLE_THINKING", "true").strip().lower() in {
++            "1",
++            "true",
++            "yes",
++            "on",
++        }
++
++    def _build_client_kwargs(self) -> dict:
++        base_url = os.getenv("BFCL_QWEN_BASE_URL")
++        if not base_url:
++            raise RuntimeError("BFCL_QWEN_BASE_URL must point at the local SGLang /v1 endpoint")
++        return {"base_url": base_url, "api_key": os.getenv("BFCL_QWEN_API_KEY", "EMPTY")}
++
++    def _query_FC(self, inference_data: dict):
++        message: list[dict] = inference_data["message"]
++        tools = inference_data["tools"]
++        inference_data["inference_input_log"] = {"message": repr(message), "tools": tools}
++        kwargs: dict[str, Any] = {
++            "messages": message,
++            "model": self.model_name,
++            "temperature": self.temperature,
++            # SGLang otherwise permits the model to use the entire remaining
++            # context window.  Keep the same per-response cap as the tau2
++            # evaluation so a pathological reasoning trace cannot consume an
++            # unbounded amount of the agentic benchmark budget.
++            "max_tokens": int(os.getenv("BFCL_QWEN_MAX_TOKENS", "8192")),
++            "store": False,
++            "extra_body": {
++                "chat_template_kwargs": {
++                    "enable_thinking": self._thinking_enabled(),
++                }
++            },
++        }
++        if tools:
++            kwargs["tools"] = tools
++        return self.generate_with_backoff(**kwargs)
++
++    def _parse_query_response_FC(self, api_response: Any) -> dict:
++        self._record_immediate_response(api_response)
++        response_data = super()._parse_query_response_FC(api_response)
++        message = api_response.choices[0].message
++        reasoning = getattr(message, "reasoning_content", None)
++        if reasoning:
++            response_data["reasoning_content"] = reasoning
++            # SGLang/Qwen accepts this OpenAI-compatible extension and needs the
++            # prior thought to continue a tool-use turn consistently.
++            history_message = response_data["model_responses_message_for_chat_history"]
++            if hasattr(history_message, "model_dump"):
++                history_message = history_message.model_dump(exclude_none=True)
++            else:
++                history_message = dict(history_message)
++            history_message["reasoning_content"] = reasoning
++            response_data["model_responses_message_for_chat_history"] = history_message
++        return response_data
++
++    @staticmethod
++    def _record_immediate_response(api_response: Any) -> None:
++        trace_path = os.getenv("BFCL_IMMEDIATE_TRACE_PATH")
++        if not trace_path:
++            return
++        payload = (
++            api_response.model_dump(mode="json")
++            if hasattr(api_response, "model_dump")
++            else api_response
++        )
++        path = Path(trace_path)
++        path.parent.mkdir(parents=True, exist_ok=True)
++        with _TRACE_LOCK, path.open("a", encoding="utf-8") as handle:
++            handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")

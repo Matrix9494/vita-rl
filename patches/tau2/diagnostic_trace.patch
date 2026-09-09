@@ -1,0 +1,93 @@
+diff --git a/src/tau2/agent/llm_agent.py b/src/tau2/agent/llm_agent.py
+index 98d36af..003aff4 100644
+--- a/src/tau2/agent/llm_agent.py
++++ b/src/tau2/agent/llm_agent.py
+@@ -111,0 +112 @@ class LLMAgent(LocalAgent[LLMAgentState]):
++            trace_role="agent",
+diff --git a/src/tau2/user/user_simulator.py b/src/tau2/user/user_simulator.py
+index a158208..e896769 100644
+--- a/src/tau2/user/user_simulator.py
++++ b/src/tau2/user/user_simulator.py
+@@ -161,0 +162 @@ class UserSimulator(BaseUser):
++            trace_role="user_simulator",
+diff --git a/src/tau2/utils/llm_utils.py b/src/tau2/utils/llm_utils.py
+index 83e31ce..aa64fb4 100644
+--- a/src/tau2/utils/llm_utils.py
++++ b/src/tau2/utils/llm_utils.py
+@@ -1,0 +2,2 @@ import json
++import os
++import threading
+@@ -2,0 +5 @@ import re
++from copy import deepcopy
+@@ -32,0 +36,31 @@ from tau2.environment.tool import Tool
++
++_DIAGNOSTIC_TRACE_LOCK = threading.Lock()
++
++
++def _record_diagnostic_generation(
++    *, model: str, role: str, response: Any, retry_without_thinking: bool
++) -> None:
++    """Append one provider response when tau2 diagnostic tracing is enabled.
++
++    This intentionally records the unmodified provider payload before tau2
++    normalizes it.  In particular, Qwen's ``reasoning_content`` remains
++    available even if the response has no visible completion and needs the
++    diagnostic-only fallback in :func:`generate`.
++    """
++    path = os.environ.get("TAU2_IMMEDIATE_TRACE_PATH")
++    if not path:
++        return
++    try:
++        raw_response = response.to_dict()
++    except Exception:  # pragma: no cover - provider response serialization
++        raw_response = str(response)
++    record = {
++        "model": model,
++        "role": role,
++        "retry_without_thinking": retry_without_thinking,
++        "raw_response": raw_response,
++    }
++    with _DIAGNOSTIC_TRACE_LOCK:
++        with open(path, "a", encoding="utf-8") as handle:
++            handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
++
+@@ -184,0 +219 @@ def generate(
++    trace_role: str = "unknown",
+@@ -218,0 +254,37 @@ def generate(
++    _record_diagnostic_generation(
++        model=model, role=trace_role, response=response, retry_without_thinking=False
++    )
++
++    # Qwen may expose a lengthy reasoning trace while reaching its output
++    # boundary before emitting content or a tool call.  Native tau2 rejects
++    # such a turn.  Diagnostic mode preserves that raw response, then retries
++    # the exact same full-history request without reasoning so the benchmark
++    # can continue.  This is opt-in and never changes a standard tau2 run.
++    raw_message = response.choices[0].message
++    if (
++        os.environ.get("TAU2_REASONING_FALLBACK") == "1"
++        and raw_message.content is None
++        and not raw_message.tool_calls
++    ):
++        retry_kwargs = deepcopy(kwargs)
++        template_kwargs = dict(retry_kwargs.get("chat_template_kwargs") or {})
++        template_kwargs["enable_thinking"] = False
++        retry_kwargs["chat_template_kwargs"] = template_kwargs
++        logger.warning(
++            "Reasoning-only response for %s; retrying the same turn with thinking disabled",
++            trace_role,
++        )
++        try:
++            response = completion(
++                model=model,
++                messages=litellm_messages,
++                tools=tools,
++                tool_choice=tool_choice,
++                **retry_kwargs,
++            )
++        except Exception as e:
++            logger.error(e)
++            raise e
++        _record_diagnostic_generation(
++            model=model, role=trace_role, response=response, retry_without_thinking=True
++        )

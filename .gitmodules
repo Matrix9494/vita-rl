@@ -1,0 +1,6 @@
+[submodule "external/gorilla"]
+	path = external/gorilla
+	url = https://github.com/ShishirPatil/gorilla.git
+[submodule "external/tau2-bench"]
+	path = external/tau2-bench
+	url = https://github.com/sierra-research/tau2-bench.git

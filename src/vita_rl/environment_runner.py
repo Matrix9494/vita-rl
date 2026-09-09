@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -45,6 +47,37 @@ class EnvironmentEpisodeResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class EnvironmentBatchResult:
+    """Reproducible aggregate of independently generated environment episodes."""
+
+    environment: str
+    harness: str
+    generation_seed: int
+    summary_window_size: int | None
+    max_steps: int
+    max_concurrency: int
+    episodes: list[EnvironmentEpisodeResult]
+
+    def to_dict(self) -> dict[str, Any]:
+        episode_dicts = [episode.to_dict() for episode in self.episodes]
+        return {
+            "environment": self.environment,
+            "harness": self.harness,
+            "generation_seed": self.generation_seed,
+            "summary_window_size": self.summary_window_size,
+            "max_steps": self.max_steps,
+            "max_concurrency": self.max_concurrency,
+            "num_episodes": len(episode_dicts),
+            "num_successes": sum(episode["success"] for episode in episode_dicts),
+            "mean_reward": (
+                sum(episode["reward"] for episode in episode_dicts) / len(episode_dicts)
+                if episode_dicts else 0.0
+            ),
+            "episodes": episode_dicts,
+        }
 
 
 class SchemaTool:
@@ -205,6 +238,64 @@ def run_tool_environment_episode(
     )
 
 
+def run_generated_environment_batch(
+    *,
+    environment_name: str,
+    num_environments: int,
+    generation_seed: int,
+    harness_name: str,
+    model: str,
+    generate_fn: Generator,
+    llm_args: dict[str, Any] | None = None,
+    max_steps: int = 30,
+    max_errors: int = 5,
+    enable_think: bool = False,
+    summary_window_size: int | None = None,
+    max_concurrency: int = 1,
+) -> EnvironmentBatchResult:
+    """Evaluate distinct seeded procedural tasks and retain every episode audit.
+
+    ``generated:<seed>`` is part of vita-mini's public task-ID contract.  It
+    keeps task sampling explicit in records, so a failed episode can be replayed
+    exactly by passing its task ID to ``run_tool_environment_episode``.
+    """
+    if num_environments < 1 or max_concurrency < 1:
+        raise ValueError("num_environments and max_concurrency must be positive")
+    if summary_window_size is not None:
+        if harness_name != "vita_rl_summary":
+            raise ValueError("summary_window_size requires harness vita_rl_summary")
+        if summary_window_size < 1:
+            raise ValueError("summary_window_size must be positive")
+        os.environ["VITA_SUMMARY_WINDOW_SIZE"] = str(summary_window_size)
+    sampler = random.Random(generation_seed)
+    task_ids = [f"generated:{sampler.randrange(0, 2**31)}" for _ in range(num_environments)]
+    def run_one(task_id: str) -> EnvironmentEpisodeResult:
+        return run_tool_environment_episode(
+            environment_name=environment_name,
+            task_id=task_id,
+            harness_name=harness_name,
+            model=model,
+            generate_fn=generate_fn,
+            llm_args=llm_args,
+            max_steps=max_steps,
+            max_errors=max_errors,
+            enable_think=enable_think,
+        )
+    # ``map`` preserves task-ID order in the audit record while permitting the
+    # SGLang data-parallel replicas to serve independent episodes concurrently.
+    with ThreadPoolExecutor(max_workers=min(max_concurrency, num_environments)) as pool:
+        episodes = list(pool.map(run_one, task_ids))
+    return EnvironmentBatchResult(
+        environment=environment_name,
+        harness=harness_name,
+        generation_seed=generation_seed,
+        summary_window_size=summary_window_size,
+        max_steps=max_steps,
+        max_concurrency=max_concurrency,
+        episodes=episodes,
+    )
+
+
 class OpenAICompatibleGenerator:
     """Minimal OpenAI-chat-completions generator for Qwen/SGLang endpoints."""
 
@@ -237,9 +328,10 @@ class OpenAICompatibleGenerator:
                 payload[key] = kwargs[key]
         if "max_tokens" not in payload and kwargs.get("max_new_tokens") is not None:
             payload["max_tokens"] = kwargs["max_new_tokens"]
-        # SGLang forwards this field to Qwen chat templates when supported.
-        if enable_think:
-            payload["chat_template_kwargs"] = {"enable_thinking": True}
+        # Qwen3.5 servers may enable reasoning by default. Send both values
+        # explicitly so ``--enable-think`` is a real on/off control rather
+        # than merely an opt-in override of a server default.
+        payload["chat_template_kwargs"] = {"enable_thinking": bool(enable_think)}
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -317,6 +409,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run a deterministic tool environment through a vita-rl harness.")
     parser.add_argument("--environment", default="vita-mini", choices=tool_environment_registry.names())
     parser.add_argument("--task-id", default="delivery_revision")
+    parser.add_argument("--num-environments", type=int, default=1, help="Number of independently seeded generated tasks to evaluate.")
+    parser.add_argument("--generation-seed", type=int, default=20260908, help="PRNG seed used to choose procedural environment seeds.")
     parser.add_argument("--harness", default="vita_rl_standard", choices=(
         "vita_rl_standard", "vita_rl_stateful", "vita_rl_summary",
         "vita_rl_recent_turns", "vita_rl_state_delta",
@@ -325,23 +419,43 @@ def main() -> None:
     parser.add_argument("--base-url", default=os.environ.get("ENVIRONMENT_BASE_URL", "http://127.0.0.1:30000/v1/chat/completions"))
     parser.add_argument("--api-key", default=os.environ.get("ENVIRONMENT_API_KEY"))
     parser.add_argument("--max-steps", type=int, default=30)
+    parser.add_argument("--max-concurrency", type=int, default=1, help="Concurrent independent environment episodes in a generated batch.")
+    parser.add_argument("--summary-window-size", type=int, help="Completed interaction turns retained verbatim by vita_rl_summary (k).")
     parser.add_argument("--max-errors", type=int, default=5)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=1024)
     parser.add_argument("--enable-think", action="store_true")
     parser.add_argument("--output", type=Path, help="Optional JSON episode-record destination.")
     args = parser.parse_args()
-    result = run_tool_environment_episode(
-        environment_name=args.environment,
-        task_id=args.task_id,
-        harness_name=args.harness,
-        model=args.model,
-        generate_fn=OpenAICompatibleGenerator(args.base_url, args.api_key),
-        llm_args={"temperature": args.temperature, "max_tokens": args.max_tokens},
-        max_steps=args.max_steps,
-        max_errors=args.max_errors,
-        enable_think=args.enable_think,
-    )
+    generator = OpenAICompatibleGenerator(args.base_url, args.api_key)
+    common = {
+        "environment_name": args.environment,
+        "harness_name": args.harness,
+        "model": args.model,
+        "generate_fn": generator,
+        "llm_args": {"temperature": args.temperature, "max_tokens": args.max_tokens},
+        "max_steps": args.max_steps,
+        "max_errors": args.max_errors,
+        "enable_think": args.enable_think,
+    }
+    if args.num_environments == 1:
+        if args.summary_window_size is not None:
+            if args.harness != "vita_rl_summary":
+                parser.error("--summary-window-size requires --harness vita_rl_summary")
+            if args.summary_window_size < 1:
+                parser.error("--summary-window-size must be positive")
+            os.environ["VITA_SUMMARY_WINDOW_SIZE"] = str(args.summary_window_size)
+        result: EnvironmentEpisodeResult | EnvironmentBatchResult = run_tool_environment_episode(
+            task_id=args.task_id, **common
+        )
+    else:
+        result = run_generated_environment_batch(
+            num_environments=args.num_environments,
+            generation_seed=args.generation_seed,
+            summary_window_size=args.summary_window_size,
+            max_concurrency=args.max_concurrency,
+            **common,
+        )
     rendered = json.dumps(result.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
