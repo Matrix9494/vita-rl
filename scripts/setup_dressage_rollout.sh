@@ -8,6 +8,7 @@ DRESSAGE_ROOT="${DRESSAGE_ROOT:-/root/Dressage}"
 PATCH_FILES=(
   "$VITA_RL_ROOT/patches/dressage/preserve_response_tokens.patch"
   "$VITA_RL_ROOT/patches/dressage/qwen35_disable_thinking.patch"
+  "$VITA_RL_ROOT/patches/dressage/qwen35_tito_match_served_template.patch"
 )
 
 [[ -d "$DRESSAGE_ROOT/.git" ]] || {

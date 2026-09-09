@@ -8,7 +8,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
-from vita_rl.environment_runner import OpenAICompatibleGenerator, run_tool_environment_episode
+from vita_rl.environment_runner import (
+    OpenAICompatibleGenerator,
+    SchemaTool,
+    run_tool_environment_episode,
+)
 from vita_rl.environments import tool_environment_registry
 
 
@@ -22,6 +26,47 @@ def _json_safe(value: Any) -> Any:
 
 class EpisodeValidationError(ValueError):
     """A client supplied an invalid environment episode request."""
+
+
+def _sglang_normalized_tool_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
+    """Mirror SGLang's OpenAI request-model serialization for proxy prompts.
+
+    A normal OpenAI request is validated by SGLang before its chat template is
+    rendered.  That validation drops BFCL's non-OpenAI ``response`` fields and
+    materializes the Function/Tool defaults (notably ``strict: false``).
+    Dressage sends pre-tokenized prompts directly to ``/generate`` and thus
+    bypasses that normalization.  Without this bridge its prompt contains a
+    materially different tool catalog from the baseline /v1/chat/completions
+    request, which makes deterministic Qwen rollouts diverge before training.
+    """
+    raw_schema = dict(schema)
+    raw_function = raw_schema.get("function")
+    if not isinstance(raw_function, Mapping):
+        raise ValueError("OpenAI tool schema must contain a function object")
+    function = dict(raw_function)
+    name = function.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError("OpenAI tool schema function.name must be a non-empty string")
+
+    wrapper_defer_loading = raw_schema.get("defer_loading")
+    function_defer_loading = function.get("defer_loading", wrapper_defer_loading)
+    normalized_function: dict[str, Any] = {
+        "description": function.get("description"),
+        "name": name,
+        "parameters": function.get("parameters"),
+        "strict": bool(function.get("strict", False)),
+    }
+    if function_defer_loading is not None:
+        normalized_function["defer_loading"] = bool(function_defer_loading)
+    return {
+        "type": str(raw_schema.get("type", "function")),
+        "function": normalized_function,
+        # SGLang's Tool model serializes this optional wrapper field even when
+        # it is null. Its position and presence affect Qwen's prompt bytes.
+        "defer_loading": (
+            None if wrapper_defer_loading is None else bool(wrapper_defer_loading)
+        ),
+    }
 
 
 def _required_string(data: Mapping[str, Any], key: str) -> str:
@@ -170,6 +215,15 @@ class DressageProxyGenerator(OpenAICompatibleGenerator):
 
     def __call__(self, **kwargs: Any) -> Any:
         self.turn_count += 1
+        tools = kwargs.get("tools")
+        if tools is not None:
+            # Dressage renders its prompt locally, whereas an ordinary SGLang
+            # chat-completions request normalizes schemas first. Send the proxy
+            # the same representation so both paths show Qwen one tool catalog.
+            kwargs["tools"] = [
+                SchemaTool(_sglang_normalized_tool_schema(tool.openai_schema))
+                for tool in tools
+            ]
         return super().__call__(
             extra_headers={
                 "X-Session-Id": self.request.session_id,

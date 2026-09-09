@@ -7,7 +7,31 @@ import subprocess
 import sys
 from pathlib import Path
 
-from vita_rl.runtime_server import EpisodeRequest
+from vita_rl.runtime_server import EpisodeRequest, _sglang_normalized_tool_schema
+
+
+def test_dressage_tool_schema_matches_sglang_openai_normalization():
+    source = {
+        "type": "function",
+        "function": {
+            "name": "lookup",
+            "description": "Looks up a value.",
+            "parameters": {"type": "object", "properties": {}},
+            # BFCL supplies this non-OpenAI extension. SGLang discards it
+            # before rendering a normal chat-completions request.
+            "response": {"type": "object"},
+        },
+    }
+    assert _sglang_normalized_tool_schema(source) == {
+        "type": "function",
+        "function": {
+            "description": "Looks up a value.",
+            "name": "lookup",
+            "parameters": {"type": "object", "properties": {}},
+            "strict": False,
+        },
+        "defer_loading": None,
+    }
 
 
 def test_legacy_vitabench_payload_normalizes_to_neutral_request():
