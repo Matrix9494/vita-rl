@@ -59,6 +59,8 @@ else
         --host 127.0.0.1 \
         --port 30000 \
         --mem-fraction-static "$SGLANG_MEM_FRACTION_STATIC" \
+        --tool-call-parser qwen3_coder \
+        --reasoning-parser qwen3 \
         >"$SGLANG_LOG" 2>&1 &
     echo $! > "$SGLANG_PID_FILE"
 
