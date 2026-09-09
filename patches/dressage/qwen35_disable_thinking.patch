@@ -2,8 +2,8 @@ diff --git a/dressage/proxy/server.py b/dressage/proxy/server.py
 index 0000000..0000000 100644
 --- a/dressage/proxy/server.py
 +++ b/dressage/proxy/server.py
-@@ -967,4 +967,10 @@ def create_app(
-     )
+@@ -968,4 +968,10 @@ def create_app(
+     none_equals_empty_tools = _tools_none_equals_empty(mask_builder)
      tito_template_kwargs = (
 -        {"preserve_thinking": True} if token_build_mode == "tito" else None
 +        # Qwen3.5 enables reasoning unless the chat template receives this
