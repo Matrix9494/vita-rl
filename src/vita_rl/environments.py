@@ -51,5 +51,11 @@ def _create_vita_mini() -> ToolUseEnvironment:
     return import_module("vita_mini").MiniEnvironment()
 
 
+def _create_bfcl_multi_turn_base() -> ToolUseEnvironment:
+    """Load BFCL only when its explicit environment is selected."""
+    return import_module("vita_rl.bfcl_environment").BFCLMultiTurnBaseEnvironment()
+
+
 tool_environment_registry = EnvironmentRegistry()
 tool_environment_registry.register("vita-mini", _create_vita_mini)
+tool_environment_registry.register("bfcl-multi-turn-base", _create_bfcl_multi_turn_base)

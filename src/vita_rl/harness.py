@@ -115,10 +115,12 @@ class VitaRLStandardAgent(LLMAgent):
         assert all(is_valid_agent_history_message(message) for message in message_history), (
             "Message history must contain only AssistantMessage, UserMessage, or ToolMessage to Agent."
         )
-        return LLMAgentState(
-            system_messages=[SystemMessage(role="system", content=self.system_prompt)],
-            messages=message_history,
+        system_messages = (
+            [SystemMessage(role="system", content=self.system_prompt)]
+            if self.domain_policy
+            else []
         )
+        return LLMAgentState(system_messages=system_messages, messages=message_history)
 
     def generate_next_message(
         self, message: ValidAgentInputMessage, state: LLMAgentState

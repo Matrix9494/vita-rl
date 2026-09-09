@@ -189,8 +189,11 @@ def run_tool_environment_episode(
         assistant, state = agent.generate_next_message(incoming, state)
         final_response = assistant.content or ""
         calls = assistant.tool_calls or []
-        pending_user_events.extend(env.next_user_event(agent_turn=agent_turn))
         if not calls:
+            # A BFCL user turn closes only after the model emits no further
+            # tool calls. Querying an environment before that point can reveal
+            # the next request while the current one is still being executed.
+            pending_user_events.extend(env.next_user_event(agent_turn=agent_turn))
             if pending_user_events:
                 event = pending_user_events.pop(0)
                 incoming = protocol.UserMessage(role="user", content=event["message"])
