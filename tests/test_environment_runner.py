@@ -156,14 +156,25 @@ from vita_rl.environment_runner import run_tool_environment_episode
 env = BFCLMultiTurnBaseEnvironment()
 env.reset("multi_turn_base_0")
 ground_truth = env._ground_truth["multi_turn_base_0"]
+tools = env.openai_tools()
 
 def decode(call):
     node = ast.parse(call, mode="eval").body
     assert isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    return node.func.id, {
+    properties = next(
+        item["function"]["parameters"]["properties"]
+        for item in tools
+        if item["function"]["name"] == node.func.id
+    )
+    arguments = {
+        key: ast.literal_eval(value)
+        for key, value in zip(properties, node.args)
+    }
+    arguments.update({
         keyword.arg: ast.literal_eval(keyword.value)
         for keyword in node.keywords
-    }
+    })
+    return node.func.id, arguments
 
 class GroundTruthGenerator:
     def __init__(self):
