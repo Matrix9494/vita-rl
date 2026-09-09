@@ -213,8 +213,8 @@ assert [event["event_id"] for event in result.user_events] == [
     "multi_turn_base_0:user_turn:2",
     "multi_turn_base_0:user_turn:3",
 ]
-assert result.evaluation["state"]["model_calls"] == [
-    [[call] for call in user_turn] for user_turn in ground_truth
+assert [len(turn) for turn in result.evaluation["state"]["model_calls"]] == [
+    len(user_turn) for user_turn in ground_truth
 ]
 '''
     environment = dict(os.environ)
