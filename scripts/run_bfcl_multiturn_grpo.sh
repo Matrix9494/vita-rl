@@ -17,6 +17,7 @@ BEST_SELECTION="${BEST_SELECTION:-$RUN_ROOT/best-heldout.json}"
 NUM_ROLLOUT="${NUM_ROLLOUT:-200}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-50}"
 EVAL_INTERVAL="${EVAL_INTERVAL:-50}"
+LR_WARMUP_ITERS="${LR_WARMUP_ITERS:-10}"
 RESUME_FROM="${RESUME_FROM:-}"
 VITA_PORT="${VITA_PORT:-9011}"
 PROXY_PORT="${PROXY_PORT:-8801}"
@@ -79,7 +80,7 @@ ray job submit --address=http://127.0.0.1:8265 --runtime-env-json="$RUNTIME_ENV_
   --rollout-function-path dressage.rollout.sync_rollout.generate_rollout_sync --eval-function-path slime.rollout.sglang_rollout.generate_rollout --custom-generate-function-path vita_rl.dressage_adapter.generate --custom-rm-path dressage.reward.custom_rm.custom_rm --data-source-path dressage.rollout.data_source.DressageDataSource --custom-reward-post-process-path dressage.training.reward_post_process.reward_post_process --custom-convert-samples-to-train-data-path dressage.rollout.convert_samples.convert_samples_to_train_data --custom-rollout-log-function-path dressage.rollout.log_rollout.log_rollout_data --custom-eval-rollout-log-function-path vita_rl.bfcl_eval_logging.log_eval_rollout_data \
   --prompt-data "$PROMPT_DATA" --eval-prompt-data bfcl-heldout "$EVAL_PROMPT_DATA" --input-key prompt --label-key label --metadata-key metadata --eval-input-key prompt --eval-label-key label --eval-interval "$EVAL_INTERVAL" --n-samples-per-eval-prompt 1 --eval-temperature 0.0 --eval-top-k 1 --eval-max-response-len 4096 \
   --num-rollout "$NUM_ROLLOUT" --rollout-batch-size 4 --n-samples-per-prompt 8 --global-batch-size 32 --rollout-max-response-len 4096 --rollout-temperature 0.8 --rollout-top-p 1.0 --rollout-shuffle --dataloader-type cyclic --seed 300 --rollout-seed 300 \
-  --advantage-estimator grpo --use-kl-loss --kl-loss-coef 0.001 --kl-loss-type low_var_kl --eps-clip 0.2 --eps-clip-high 0.28 --eps-clip-c 10.0 --optimizer adam --lr 1e-6 --lr-decay-style constant --lr-warmup-iters 10 --weight-decay 0.01 --adam-beta1 0.9 --adam-beta2 0.98 --clip-grad 1.0 --use-precision-aware-optimizer --optimizer-cpu-offload --overlap-cpu-optimizer-d2h-h2d \
+  --advantage-estimator grpo --use-kl-loss --kl-loss-coef 0.001 --kl-loss-type low_var_kl --eps-clip 0.2 --eps-clip-high 0.28 --eps-clip-c 10.0 --optimizer adam --lr 1e-6 --lr-decay-style constant --lr-warmup-iters "$LR_WARMUP_ITERS" --weight-decay 0.01 --adam-beta1 0.9 --adam-beta2 0.98 --clip-grad 1.0 --use-precision-aware-optimizer --optimizer-cpu-offload --overlap-cpu-optimizer-d2h-h2d \
   --tensor-model-parallel-size 1 --pipeline-model-parallel-size 1 --context-parallel-size 1 --recompute-granularity full --recompute-method uniform --recompute-num-layers 1 --use-dynamic-batch-size --max-tokens-per-gpu 4096 --log-probs-chunk-size 512 --rollout-num-gpus-per-engine 1 --sglang-mem-fraction-static 0.32 --sglang-router-port "$SGLANG_PORT" --router-policy consistent_hashing --attention-dropout 0.0 --hidden-dropout 0.0 --accumulate-allreduce-grads-in-fp32 --attention-softmax-in-fp32 --attention-backend flash 2>&1 | tee "$LOG_DIR/grpo.log"
 
 echo "[7/8] convert final and selected held-out checkpoint"
