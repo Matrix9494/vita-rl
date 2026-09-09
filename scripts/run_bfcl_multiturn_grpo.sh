@@ -56,11 +56,10 @@ if [[ ! -f "$REF_LOAD/latest_checkpointed_iteration.txt" ]]; then
 fi
 
 echo "[4/8] start no-thinking Dressage proxy and BFCL runtime"
-# Qwen3.5 emits XML-style calls.  Parse them locally in the proxy rather than
-# relying on the optional SGLang-router /workers + /parse_function_call API:
-# a missing/failed router parser previously converted valid calls into plain
-# assistant text and made the BFCL terminal reward collapse to zero.
-PYTHONPATH=/root/Dressage:/root/Dressage/slime:/root/Megatron-LM python3 -m dressage.proxy.server --sglang-router-url "http://$MASTER_ADDR:$SGLANG_PORT" --tokenizer-path "$QWEN_MODEL" --host 0.0.0.0 --port "$PROXY_PORT" --model-mask-type qwen3_5 --model-tool-call-type qwen3_5 --tool-call-parse-backend local --model-reasoning-type qwen3 --reasoning-parse-backend local --token-build-mode tito --tito-model qwen3_5 >"$LOG_DIR/dressage-proxy.log" 2>&1 &
+# Prefer SGLang's native Qwen parser: unlike a generic XML parser, it applies
+# the tool schema (e.g. preserves string ZIP codes). The setup patch lets this
+# also work when a single direct SGLang server has no /workers endpoint.
+PYTHONPATH=/root/Dressage:/root/Dressage/slime:/root/Megatron-LM python3 -m dressage.proxy.server --sglang-router-url "http://$MASTER_ADDR:$SGLANG_PORT" --tokenizer-path "$QWEN_MODEL" --host 0.0.0.0 --port "$PROXY_PORT" --model-mask-type qwen3_5 --model-tool-call-type qwen3_5 --tool-call-parse-backend sglang_api --model-reasoning-type qwen3 --reasoning-parse-backend sglang_api --token-build-mode tito --tito-model qwen3_5 >"$LOG_DIR/dressage-proxy.log" 2>&1 &
 PROXY_PID=$!
 for _ in $(seq 1 60); do curl -fsS "http://127.0.0.1:$PROXY_PORT/health" >/dev/null 2>&1 && break; sleep 1; done
 curl -fsS "http://127.0.0.1:$PROXY_PORT/health" >/dev/null
