@@ -142,7 +142,7 @@ def group_summary(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dic
 def training_metrics(log_path: Path) -> list[dict[str, Any]]:
     if not log_path.exists():
         return []
-    metric_re = re.compile(r"(?:rollout|step)\s+(\d+):\s+(\{.*\})")
+    metric_re = re.compile(r"(?:rollout|step|perf)\s+(\d+):\s+(\{.*\})")
     rows = []
     for line in log_path.read_text(errors="replace").splitlines():
         line = re.sub(r"\x1b\[[0-9;]*m", "", line)
