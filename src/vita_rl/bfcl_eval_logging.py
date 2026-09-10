@@ -40,6 +40,10 @@ def log_eval_rollout_data(
             {
                 "task_id": metadata.get("task_id") if isinstance(metadata, dict) else None,
                 "terminal_reward": reward,
+                "termination_reason": metadata.get("environment_termination_reason") if isinstance(metadata, dict) else None,
+                "num_agent_turns": metadata.get("environment_num_agent_turns") if isinstance(metadata, dict) else None,
+                "simulation": metadata.get("environment_simulation") if isinstance(metadata, dict) else None,
+                "final_response": getattr(sample, "response", None) if sample is not None else None,
             }
         )
     numeric_rewards = [reward for reward in rewards if reward is not None]

@@ -13,6 +13,7 @@ PROMPT_DATA="${PROMPT_DATA:-$RUN_ROOT/train-prompts.jsonl}"
 EVAL_PROMPT_DATA="${EVAL_PROMPT_DATA:-$RUN_ROOT/eval-prompts.jsonl}"
 LOG_DIR="${LOG_DIR:-$RUN_ROOT/logs}"
 EVAL_METRICS="${EVAL_METRICS:-$RUN_ROOT/bfcl-heldout-eval.jsonl}"
+TRAIN_GROUPS="${TRAIN_GROUPS:-$RUN_ROOT/bfcl-train-groups.jsonl}"
 BEST_SELECTION="${BEST_SELECTION:-$RUN_ROOT/best-heldout.json}"
 NUM_ROLLOUT="${NUM_ROLLOUT:-200}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-50}"
@@ -72,7 +73,7 @@ echo "[5/8] start one-H100 Ray"
 export PYTHONPATH="/root/Megatron-LM:/root/Dressage:/root/Dressage/slime:$VITA_RL_ROOT/src:$BFCL_ROOT:${PYTHONPATH:-}"
 export no_proxy="127.0.0.1,localhost,$MASTER_ADDR"
 ray start --head --node-ip-address "$MASTER_ADDR" --num-gpus 1 --disable-usage-stats --dashboard-host=127.0.0.1 --dashboard-port=8265 >"$LOG_DIR/ray-head.log" 2>&1
-RUNTIME_ENV_JSON="{\"env_vars\":{\"PYTHONPATH\":\"/root/Megatron-LM:/root/Dressage:/root/Dressage/slime:$VITA_RL_ROOT/src:$BFCL_ROOT\",\"DRESSAGE_PROXY_URL\":\"http://$MASTER_ADDR:$PROXY_PORT\",\"ENVIRONMENT_RUNTIME_URL\":\"http://$MASTER_ADDR:$VITA_PORT\",\"DRESSAGE_REWARD_MODULES\":\"vita_rl.reward\",\"BFCL_SOURCE_ROOT\":\"$BFCL_ROOT\",\"BFCL_EVAL_METRICS_PATH\":\"$EVAL_METRICS\",\"no_proxy\":\"127.0.0.1,localhost,$MASTER_ADDR\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\"}}"
+RUNTIME_ENV_JSON="{\"env_vars\":{\"PYTHONPATH\":\"/root/Megatron-LM:/root/Dressage:/root/Dressage/slime:$VITA_RL_ROOT/src:$BFCL_ROOT\",\"DRESSAGE_PROXY_URL\":\"http://$MASTER_ADDR:$PROXY_PORT\",\"ENVIRONMENT_RUNTIME_URL\":\"http://$MASTER_ADDR:$VITA_PORT\",\"DRESSAGE_REWARD_MODULES\":\"vita_rl.reward\",\"BFCL_SOURCE_ROOT\":\"$BFCL_ROOT\",\"BFCL_EVAL_METRICS_PATH\":\"$EVAL_METRICS\",\"BFCL_TRAIN_GROUPS_PATH\":\"$TRAIN_GROUPS\",\"no_proxy\":\"127.0.0.1,localhost,$MASTER_ADDR\",\"CUDA_DEVICE_MAX_CONNECTIONS\":\"1\"}}"
 LOAD_ARGS=(--ref-load "$REF_LOAD" --no-load-optim --no-load-rng)
 [[ -n "$RESUME_FROM" ]] && LOAD_ARGS=(--load "$RESUME_FROM")
 
@@ -81,7 +82,7 @@ cd /root/Dressage/slime
 source scripts/models/qwen3.5-4B.sh
 ray job submit --address=http://127.0.0.1:8265 --runtime-env-json="$RUNTIME_ENV_JSON" -- python3 -m train \
   --actor-num-nodes 1 --actor-num-gpus-per-node 1 --colocate "${MODEL_ARGS[@]}" --hf-checkpoint "$QWEN_MODEL" "${LOAD_ARGS[@]}" --save "$CKPT_SAVE" --save-interval "$SAVE_INTERVAL" \
-  --rollout-function-path dressage.rollout.sync_rollout.generate_rollout_sync --eval-function-path vita_rl.bfcl_eval_rollout.generate_rollout --custom-generate-function-path vita_rl.dressage_adapter.generate --custom-rm-path dressage.reward.custom_rm.custom_rm --data-source-path dressage.rollout.data_source.DressageDataSource --custom-reward-post-process-path dressage.training.reward_post_process.reward_post_process --custom-convert-samples-to-train-data-path dressage.rollout.convert_samples.convert_samples_to_train_data --custom-rollout-log-function-path dressage.rollout.log_rollout.log_rollout_data --custom-eval-rollout-log-function-path vita_rl.bfcl_eval_logging.log_eval_rollout_data \
+  --rollout-function-path dressage.rollout.sync_rollout.generate_rollout_sync --eval-function-path vita_rl.bfcl_eval_rollout.generate_rollout --custom-generate-function-path vita_rl.dressage_adapter.generate --custom-rm-path dressage.reward.custom_rm.custom_rm --data-source-path dressage.rollout.data_source.DressageDataSource --custom-reward-post-process-path dressage.training.reward_post_process.reward_post_process --custom-convert-samples-to-train-data-path dressage.rollout.convert_samples.convert_samples_to_train_data --custom-rollout-log-function-path vita_rl.bfcl_train_logging.log_rollout_data --custom-eval-rollout-log-function-path vita_rl.bfcl_eval_logging.log_eval_rollout_data \
   --prompt-data "$PROMPT_DATA" --eval-prompt-data bfcl-heldout "$EVAL_PROMPT_DATA" --apply-chat-template --input-key prompt --label-key label --metadata-key metadata --eval-input-key prompt --eval-label-key label --eval-interval "$EVAL_INTERVAL" --n-samples-per-eval-prompt 1 --eval-temperature 0.0 --eval-top-k 1 --eval-max-response-len 4096 \
   --num-rollout "$NUM_ROLLOUT" --rollout-batch-size 4 --n-samples-per-prompt 8 --global-batch-size 32 --rollout-max-response-len 4096 --rollout-temperature 0.8 --rollout-top-p 1.0 --rollout-shuffle --dataloader-type cyclic --seed 300 --rollout-seed 300 \
   --advantage-estimator grpo --use-kl-loss --kl-loss-coef 0.001 --kl-loss-type low_var_kl --eps-clip 0.2 --eps-clip-high 0.28 --eps-clip-c 10.0 --optimizer adam --lr 1e-6 --lr-decay-style constant --lr-warmup-iters "$LR_WARMUP_ITERS" --weight-decay 0.01 --adam-beta1 0.9 --adam-beta2 0.98 --clip-grad 1.0 --use-precision-aware-optimizer --optimizer-cpu-offload --overlap-cpu-optimizer-d2h-h2d \
