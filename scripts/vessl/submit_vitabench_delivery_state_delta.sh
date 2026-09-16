@@ -29,7 +29,8 @@ ssh vessl-vita bash -s -- "$COMMIT" "$REMOTE_WORKTREE" <<'REMOTE'
 set -euo pipefail
 commit="$1"
 worktree="$2"
-git -C /root/projects/vita-rl fetch --quiet origin "$commit"
+git -C /root/projects/vita-rl fetch --quiet origin main
+git -C /root/projects/vita-rl cat-file -e "${commit}^{commit}"
 if [[ -e "$worktree" ]]; then
     [[ "$(git -C "$worktree" rev-parse HEAD)" == "$commit" ]] || {
         echo "Existing Vessl worktree has the wrong commit: $worktree" >&2
