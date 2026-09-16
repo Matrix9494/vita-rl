@@ -29,6 +29,9 @@ SELECTION_SEED="${VITA_SELECTION_SEED:-20260906}"
 MAX_STEPS="${VITA_MAX_STEPS:-300}"
 CONCURRENCY="${VITA_MAX_CONCURRENCY:-20}"
 AGENT_IMPLEMENTATION="${VITA_AGENT_IMPLEMENTATION:-vita_rl_standard}"
+AGENT_TEMPERATURE="${VITA_AGENT_TEMPERATURE:-0.0}"
+AGENT_THINKING="${VITA_AGENT_THINKING:-false}"
+OPENROUTER_KEY_FILE="${OPENROUTER_KEY_FILE:-$REPO/key}"
 JOB_TAG="${SLURM_JOB_ID:-manual}"
 SGLANG_LOG="$REPO/logs/sglang-vita40-${JOB_TAG}.log"
 RESULT="$REPO/outputs/vita40-${JOB_TAG}.json"
@@ -37,6 +40,7 @@ SELECTION="$REPO/outputs/vita40_tasks-${JOB_TAG}.json"
 SGLANG_SMOKE="$REPO/outputs/sglang_qwen35_smoke-${JOB_TAG}.json"
 OPENROUTER_LOG="$REPO/logs/openrouter-vita40-${JOB_TAG}.log"
 SUMMARY_TRACE="${VITA_SUMMARY_TRACE_PATH:-$REPO/outputs/vita_summary_trace-${JOB_TAG}.jsonl}"
+STATE_TRACE="${VITA_STATE_TRACE_PATH:-$REPO/outputs/vita_state_trace-${JOB_TAG}.jsonl}"
 
 case "$TASK_SET" in
     delivery|ota|instore)
@@ -57,6 +61,7 @@ export VITA_INPUT_TOKENIZER_PATH="$MODEL"
 export HF_HOME=/data/user/dz13/vita-rl/hf-cache
 export TRANSFORMERS_CACHE="$HF_HOME"
 export VITA_SUMMARY_TRACE_PATH="$SUMMARY_TRACE"
+export VITA_STATE_TRACE_PATH="$STATE_TRACE"
 
 SGLANG_PID=""
 OPENROUTER_PID=""
@@ -80,10 +85,25 @@ trap cleanup EXIT INT TERM
 
 [[ -d "$MODEL" ]] || { echo "Missing model: $MODEL" >&2; exit 1; }
 [[ -d "$VITABENCH" ]] || { echo "Missing VitaBench checkout: $VITABENCH" >&2; exit 1; }
-[[ -n "${OPENROUTER_API_KEY:-}" ]] || {
-    echo "OPENROUTER_API_KEY is required: this launcher follows the VESSL role split (local Qwen agent, gpt-4.1 user/evaluator)." >&2
+[[ "$AGENT_THINKING" == "false" ]] || {
+    echo "This evaluation is intentionally no-thinking; set VITA_AGENT_THINKING=false." >&2
     exit 2
 }
+
+if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
+    [[ -s "$OPENROUTER_KEY_FILE" ]] || {
+        echo "OPENROUTER_API_KEY is unset and key file is missing or empty: $OPENROUTER_KEY_FILE" >&2
+        exit 2
+    }
+    key_mode="$(stat -c '%a' "$OPENROUTER_KEY_FILE")"
+    (( (8#$key_mode & 077) == 0 )) || {
+        echo "Refusing OpenRouter key file with group/world permissions: $OPENROUTER_KEY_FILE ($key_mode)" >&2
+        exit 2
+    }
+    OPENROUTER_API_KEY="$(tr -d '\r\n' < "$OPENROUTER_KEY_FILE")"
+    [[ -n "$OPENROUTER_API_KEY" ]] || { echo "OpenRouter key file is blank" >&2; exit 2; }
+    export OPENROUTER_API_KEY
+fi
 
 # Keep the actual API key in the relay only. VitaBench sees a disposable
 # localhost endpoint and a placeholder header, just as in VESSL.
@@ -102,12 +122,14 @@ done
 [[ -s "$OPENROUTER_PORT_FILE" ]] || { echo "OpenRouter relay did not become ready; see $OPENROUTER_LOG" >&2; exit 1; }
 
 VITA_MODEL_CONFIG="$(mktemp /tmp/vita-rl-models.XXXXXX.yaml)"
-python - "$VITA_MODEL_CONFIG" "$(<"$OPENROUTER_PORT_FILE")" "$BASE_URL/chat/completions" <<'PY'
+python - "$VITA_MODEL_CONFIG" "$(<"$OPENROUTER_PORT_FILE")" "$BASE_URL/chat/completions" "$AGENT_TEMPERATURE" "$AGENT_THINKING" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-path, proxy_port, agent_endpoint = sys.argv[1:]
+path, proxy_port, agent_endpoint, temperature_text, thinking_text = sys.argv[1:]
+temperature = float(temperature_text)
+thinking = thinking_text.lower() == "true"
 config = {
     "default": {
         "base_url": f"http://127.0.0.1:{proxy_port}/v1/chat/completions",
@@ -122,7 +144,7 @@ config = {
         {
             "name": "qwen35-4b-local",
             "base_url": agent_endpoint,
-            "temperature": 1.0,
+            "temperature": temperature,
             "top_p": 0.95,
             "top_k": 20,
             "presence_penalty": 1.5,
@@ -130,7 +152,7 @@ config = {
             "n": 1,
             "max_tokens": 8192,
             "max_input_tokens": 65536,
-            "chat_template_kwargs": {"enable_thinking": False},
+            "chat_template_kwargs": {"enable_thinking": thinking},
             "headers": {
                 "Authorization": "Bearer EMPTY",
                 "Content-Type": "application/json",
@@ -228,21 +250,32 @@ PYTHONPATH="$REPO/src${PYTHONPATH:+:$PYTHONPATH}" python -m vita_rl.vita_cli run
     --max-steps "$MAX_STEPS" \
     --num-trials 1 \
     --max-concurrency "$CONCURRENCY" \
-    --enable-think \
     --language english \
     --save-to "$RESULT"
 
-python - "$RESULT" "$SUMMARY" "$SELECTION" "$SGLANG_SMOKE" "$CONCURRENCY" <<'PY'
+if [[ "$AGENT_IMPLEMENTATION" == "vita_rl_stateful" && ! -s "$STATE_TRACE" ]]; then
+    echo "Stateful evaluation produced no state-transition trace: $STATE_TRACE" >&2
+    exit 1
+fi
+
+python - "$RESULT" "$SUMMARY" "$SELECTION" "$SGLANG_SMOKE" "$CONCURRENCY" "$AGENT_IMPLEMENTATION" "$AGENT_TEMPERATURE" "$AGENT_THINKING" "$STATE_TRACE" "$TASK_SET" "$SELECTION_SEED" "$TASK_COUNT" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 result_path, summary_path, selection_path, smoke_path = map(Path, sys.argv[1:5])
 concurrency = int(sys.argv[5])
+agent_implementation = sys.argv[6]
+agent_temperature = float(sys.argv[7])
+agent_thinking = sys.argv[8].lower() == "true"
+state_trace_path = sys.argv[9]
+task_set, selection_seed, expected_task_count = sys.argv[10], int(sys.argv[11]), int(sys.argv[12])
 result = json.loads(result_path.read_text())
 simulations = result.get("simulations", [])
 if not simulations:
     raise SystemExit(f"No simulations were saved to {result_path}")
+if len(simulations) != expected_task_count:
+    raise SystemExit(f"Expected {expected_task_count} completed tasks, got {len(simulations)}")
 
 records = []
 for simulation in simulations:
@@ -274,8 +307,8 @@ summary = {
         "evaluator": "gpt-4.1",
     },
     "agent_inference": {
-        "thinking": True,
-        "temperature": 1.0,
+        "thinking": agent_thinking,
+        "temperature": agent_temperature,
         "top_p": 0.95,
         "top_k": 20,
         "presence_penalty": 1.5,
@@ -287,6 +320,13 @@ summary = {
     "requested_concurrency": concurrency,
     "requested_sglang_data_parallel_size": 2,
     "requested_sglang_max_running_requests": concurrency,
+    "experiment": {
+        "harness": agent_implementation,
+        "task_set": task_set,
+        "selection_seed": selection_seed,
+        "task_count": expected_task_count,
+        "state_trace_file": state_trace_path if agent_implementation == "vita_rl_stateful" else None,
+    },
     "tasks": records,
 }
 summary_path.write_text(json.dumps(summary, indent=2) + "\n")
