@@ -8,8 +8,12 @@ source /root/setup_env.sh
 
 REPO="${VITA_EVAL_REPO:-${VITA_RL_ROOT:?VITA_RL_ROOT is required}}"
 VITA_ROOT="${VITA_ROOT:?VITA_ROOT is required}"
-VITA_PYTHON="${VITA_PYTHON:-${VITA_VENV:?VITA_VENV is required}/bin/python}"
 SGLANG_PYTHON="${SGLANG_PYTHON:-/root/venvs/dressage-cu129-py312/bin/python}"
+# Vessl's historical /root/venvs/vita Python shim can point at the system
+# interpreter after a platform Python upgrade. The Dressage environment hosts
+# the compatible SGLang, Torch, and VitaBench dependencies, so it is the safe
+# default for both inference and VitaBench; VITA_PYTHON remains overridable.
+VITA_PYTHON="${VITA_PYTHON:-$SGLANG_PYTHON}"
 MODEL="${QWEN_MODEL:?QWEN_MODEL is required}"
 RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-delivery-state-delta-$(date -u +%Y%m%dT%H%M%SZ)}"
 RUN_ROOT="${VITA_EVAL_OUTPUT_ROOT:-/root/outputs/vita-rl/vitabench/${RUN_ID}}"
