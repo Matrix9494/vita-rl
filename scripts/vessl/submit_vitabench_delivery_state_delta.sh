@@ -7,7 +7,9 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 KEY_FILE="${OPENROUTER_KEY_FILE:-$REPO/key}"
 COMMIT="${VITA_EVAL_COMMIT:-$(git -C "$REPO" rev-parse HEAD)}"
-RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-delivery-state-delta-$(date -u +%Y%m%dT%H%M%SZ)}"
+TASK_SET="${VITA_TASK_SET:-delivery}"
+TASK_LANGUAGE="${VITA_TASK_LANGUAGE:-english}"
+RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-${TASK_SET}-state-delta-$(date -u +%Y%m%dT%H%M%SZ)}"
 AGENT_TEMPERATURE="${VITA_AGENT_TEMPERATURE:-0.0}"
 REMOTE_WORKTREE="/root/projects/vita-rl-vita-eval-${COMMIT:0:12}"
 REMOTE_ROOT="/root/outputs/vita-rl/vitabench/${RUN_ID}"
@@ -44,7 +46,7 @@ REMOTE
 
 # stdin carries only the one-line raw key. The remote shell exports it to the
 # detached runner process; the runner unsets it after its localhost proxy starts.
-remote_command=$(printf 'IFS= read -r OPENROUTER_API_KEY; export OPENROUTER_API_KEY; mkdir -p %q; nohup env VITA_EVAL_REPO=%q VITA_EVAL_OUTPUT_ROOT=%q VITA_EVAL_RUN_ID=%q VITA_AGENT_TEMPERATURE=%q %q > %q 2>&1 & pid=$!; unset OPENROUTER_API_KEY; printf "pid=%%s run_root=%%s\\n" "$pid" %q' \
-    "$REMOTE_ROOT" "$REMOTE_WORKTREE" "$REMOTE_ROOT" "$RUN_ID" "$AGENT_TEMPERATURE" "$REMOTE_RUNNER" "$REMOTE_ROOT/driver.log" "$REMOTE_ROOT")
+remote_command=$(printf 'IFS= read -r OPENROUTER_API_KEY; export OPENROUTER_API_KEY; mkdir -p %q; nohup env VITA_EVAL_REPO=%q VITA_EVAL_OUTPUT_ROOT=%q VITA_EVAL_RUN_ID=%q VITA_AGENT_TEMPERATURE=%q VITA_TASK_SET=%q VITA_TASK_LANGUAGE=%q %q > %q 2>&1 & pid=$!; unset OPENROUTER_API_KEY; printf "pid=%%s run_root=%%s\\n" "$pid" %q' \
+    "$REMOTE_ROOT" "$REMOTE_WORKTREE" "$REMOTE_ROOT" "$RUN_ID" "$AGENT_TEMPERATURE" "$TASK_SET" "$TASK_LANGUAGE" "$REMOTE_RUNNER" "$REMOTE_ROOT/driver.log" "$REMOTE_ROOT")
 tr -d '\r\n' < "$KEY_FILE" | ssh vessl-vita "bash -lc $(printf '%q' "$remote_command")"
 echo "Vessl evaluation started. Poll driver.log remotely, then run: $0 --fetch"

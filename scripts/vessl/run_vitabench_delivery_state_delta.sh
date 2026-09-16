@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Run the fixed 100-task VitaBench delivery evaluation with the LLM state-delta
-# harness on Vessl.  OPENROUTER_API_KEY must be supplied only in this process
-# environment by the remote submit wrapper; this script never reads a key file.
+# Run a fixed 100-task VitaBench evaluation with the LLM state-delta harness on
+# Vessl. OPENROUTER_API_KEY must be supplied only in this process environment
+# by the remote submit wrapper; this script never reads a key file.
 set -euo pipefail
 
 source /root/setup_env.sh
@@ -15,9 +15,10 @@ SGLANG_PYTHON="${SGLANG_PYTHON:-/root/venvs/dressage-cu129-py312/bin/python}"
 # default for both inference and VitaBench; VITA_PYTHON remains overridable.
 VITA_PYTHON="${VITA_PYTHON:-$SGLANG_PYTHON}"
 MODEL="${QWEN_MODEL:?QWEN_MODEL is required}"
-RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-delivery-state-delta-$(date -u +%Y%m%dT%H%M%SZ)}"
+TASK_SET="${VITA_TASK_SET:-delivery}"
+TASK_LANGUAGE="${VITA_TASK_LANGUAGE:-english}"
+RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-${TASK_SET}-state-delta-$(date -u +%Y%m%dT%H%M%SZ)}"
 RUN_ROOT="${VITA_EVAL_OUTPUT_ROOT:-/root/outputs/vita-rl/vitabench/${RUN_ID}}"
-TASK_SET=delivery
 TASK_COUNT=100
 SELECTION_SEED=20260906
 MAX_STEPS=100
@@ -36,8 +37,12 @@ OPENROUTER_LOG="$RUN_ROOT/logs/openrouter-proxy.log"
 
 [[ -d "$REPO" ]] || { echo "Missing evaluation repository: $REPO" >&2; exit 2; }
 [[ -d "$VITA_ROOT" ]] || { echo "Missing VitaBench checkout: $VITA_ROOT" >&2; exit 2; }
-[[ -f "$VITA_ROOT/data/vita/domains/delivery/tasks_en.json" ]] || {
-    echo "Missing VitaBench English delivery tasks: $VITA_ROOT/data/vita/domains/delivery/tasks_en.json" >&2
+TASK_FILE="$VITA_ROOT/data/vita/domains/$TASK_SET/tasks.json"
+if [[ "$TASK_LANGUAGE" == "english" ]]; then
+    TASK_FILE="$VITA_ROOT/data/vita/domains/$TASK_SET/tasks_en.json"
+fi
+[[ -f "$TASK_FILE" ]] || {
+    echo "Missing VitaBench $TASK_LANGUAGE $TASK_SET tasks: $TASK_FILE" >&2
     exit 2
 }
 [[ -d "$MODEL" ]] || { echo "Missing model: $MODEL" >&2; exit 2; }
@@ -128,17 +133,18 @@ export VITA_MODEL_CONFIG_PATH="$VITA_MODEL_CONFIG"
 unset OPENROUTER_API_KEY
 
 cd "$VITA_ROOT"
-PYTHONPATH="$VITA_ROOT/src" "$VITA_PYTHON" - "$SELECTION" <<'PY'
+PYTHONPATH="$VITA_ROOT/src" "$VITA_PYTHON" - "$SELECTION" "$TASK_SET" "$TASK_LANGUAGE" <<'PY'
 import json
 import random
 import sys
 from vita.run import load_tasks
 
-tasks = load_tasks("delivery", language="english")
+selection_path, task_set, task_language = sys.argv[1:]
+tasks = load_tasks(task_set, language=task_language)
 selected = random.Random(20260906).sample(tasks, 100)
-payload = {"task_set": "delivery", "selection_seed": 20260906, "task_count": 100,
+payload = {"task_set": task_set, "task_language": task_language, "selection_seed": 20260906, "task_count": 100,
            "task_ids": [task.id for task in selected]}
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
+with open(selection_path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2)
     handle.write("\n")
 PY
@@ -169,24 +175,25 @@ curl --fail --silent --show-error --max-time 5 "$BASE_URL/models" >/dev/null || 
     --base-url "$BASE_URL" --model qwen35-4b-local --output "$SGLANG_SMOKE"
 
 PYTHONPATH="$REPO/src:$VITA_ROOT/src" "$VITA_PYTHON" -m vita_rl.vita_cli run \
-    --domain delivery --task-set-name delivery --task-ids "${TASK_IDS[@]}" \
+    --domain "$TASK_SET" --task-set-name "$TASK_SET" --task-ids "${TASK_IDS[@]}" \
     --agent vita_rl_state_delta --agent-llm qwen35-4b-local \
     --user-llm gpt-4.1 --evaluator-llm gpt-4.1 --max-steps "$MAX_STEPS" \
-    --num-trials 1 --max-concurrency "$CONCURRENCY" --language english --save-to "$RESULT"
+    --num-trials 1 --max-concurrency "$CONCURRENCY" --language "$TASK_LANGUAGE" --save-to "$RESULT"
 
 [[ -s "$STATE_DELTA_TRACE" ]] || { echo "State-delta trace is empty: $STATE_DELTA_TRACE" >&2; exit 1; }
 
 REPO_COMMIT="$(git -C "$REPO" rev-parse HEAD)"
 VITABENCH_COMMIT="$(git -C "$VITA_ROOT" rev-parse HEAD)"
 "$VITA_PYTHON" - "$RESULT" "$SUMMARY" "$SELECTION" "$SGLANG_SMOKE" "$STATE_DELTA_TRACE" \
-    "$REPO_COMMIT" "$VITABENCH_COMMIT" "$RUN_ID" "$CONCURRENCY" "$AGENT_TEMPERATURE" <<'PY'
+    "$REPO_COMMIT" "$VITABENCH_COMMIT" "$RUN_ID" "$CONCURRENCY" "$AGENT_TEMPERATURE" "$TASK_SET" "$TASK_LANGUAGE" <<'PY'
 import json
 import sys
 from collections import Counter
 from pathlib import Path
 
 (result_path, summary_path, selection_path, smoke_path, trace_path,
- repo_commit, vitabench_commit, run_id, concurrency, agent_temperature) = sys.argv[1:]
+ repo_commit, vitabench_commit, run_id, concurrency, agent_temperature,
+ task_set, task_language) = sys.argv[1:]
 result = json.loads(Path(result_path).read_text())
 simulations = result.get("simulations", [])
 if len(simulations) != 100:
@@ -216,7 +223,8 @@ summary = {
     "agent_inference": {"temperature": float(agent_temperature), "thinking": False, "top_p": 1.0, "top_k": 1},
     "harness": "vita_rl_state_delta",
     "state_delta_updater": "llm",
-    "task_set": "delivery",
+    "task_set": task_set,
+    "task_language": task_language,
     "selection_seed": 20260906,
     "task_count": 100,
     "max_steps": 100,
