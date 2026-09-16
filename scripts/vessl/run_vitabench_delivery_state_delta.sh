@@ -35,6 +35,10 @@ OPENROUTER_LOG="$RUN_ROOT/logs/openrouter-proxy.log"
 
 [[ -d "$REPO" ]] || { echo "Missing evaluation repository: $REPO" >&2; exit 2; }
 [[ -d "$VITA_ROOT" ]] || { echo "Missing VitaBench checkout: $VITA_ROOT" >&2; exit 2; }
+[[ -f "$VITA_ROOT/data/vita/domains/delivery/tasks_en.json" ]] || {
+    echo "Missing VitaBench English delivery tasks: $VITA_ROOT/data/vita/domains/delivery/tasks_en.json" >&2
+    exit 2
+}
 [[ -d "$MODEL" ]] || { echo "Missing model: $MODEL" >&2; exit 2; }
 [[ -x "$VITA_PYTHON" ]] || { echo "Missing VitaBench Python: $VITA_PYTHON" >&2; exit 2; }
 [[ -x "$SGLANG_PYTHON" ]] || { echo "Missing SGLang Python: $SGLANG_PYTHON" >&2; exit 2; }
