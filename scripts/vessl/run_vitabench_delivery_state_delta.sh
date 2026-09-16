@@ -22,6 +22,7 @@ TASK_COUNT=100
 SELECTION_SEED=20260906
 MAX_STEPS=100
 CONCURRENCY="${VITA_MAX_CONCURRENCY:-30}"
+AGENT_TEMPERATURE="${VITA_AGENT_TEMPERATURE:-0.0}"
 PORT="${SGLANG_PORT:-30000}"
 BASE_URL="http://127.0.0.1:${PORT}/v1"
 
@@ -91,12 +92,12 @@ done
 [[ -s "$OPENROUTER_PORT_FILE" ]] || { echo "OpenRouter proxy startup timed out" >&2; exit 1; }
 
 VITA_MODEL_CONFIG="$(mktemp /tmp/vita-rl-models.XXXXXX.yaml)"
-"$VITA_PYTHON" - "$VITA_MODEL_CONFIG" "$(<"$OPENROUTER_PORT_FILE")" "$BASE_URL/chat/completions" <<'PY'
+"$VITA_PYTHON" - "$VITA_MODEL_CONFIG" "$(<"$OPENROUTER_PORT_FILE")" "$BASE_URL/chat/completions" "$AGENT_TEMPERATURE" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-path, proxy_port, agent_endpoint = sys.argv[1:]
+path, proxy_port, agent_endpoint, agent_temperature = sys.argv[1:]
 config = {
     "default": {
         "base_url": f"http://127.0.0.1:{proxy_port}/v1/chat/completions",
@@ -108,7 +109,7 @@ config = {
     }, {
         "name": "qwen35-4b-local",
         "base_url": agent_endpoint,
-        "temperature": 0.0,
+        "temperature": float(agent_temperature),
         "top_p": 1.0,
         "top_k": 1,
         "presence_penalty": 0.0,
@@ -177,14 +178,14 @@ PYTHONPATH="$REPO/src:$VITA_ROOT/src" "$VITA_PYTHON" -m vita_rl.vita_cli run \
 REPO_COMMIT="$(git -C "$REPO" rev-parse HEAD)"
 VITABENCH_COMMIT="$(git -C "$VITA_ROOT" rev-parse HEAD)"
 "$VITA_PYTHON" - "$RESULT" "$SUMMARY" "$SELECTION" "$SGLANG_SMOKE" "$STATE_DELTA_TRACE" \
-    "$REPO_COMMIT" "$VITABENCH_COMMIT" "$RUN_ID" "$CONCURRENCY" <<'PY'
+    "$REPO_COMMIT" "$VITABENCH_COMMIT" "$RUN_ID" "$CONCURRENCY" "$AGENT_TEMPERATURE" <<'PY'
 import json
 import sys
 from collections import Counter
 from pathlib import Path
 
 (result_path, summary_path, selection_path, smoke_path, trace_path,
- repo_commit, vitabench_commit, run_id, concurrency) = sys.argv[1:]
+ repo_commit, vitabench_commit, run_id, concurrency, agent_temperature) = sys.argv[1:]
 result = json.loads(Path(result_path).read_text())
 simulations = result.get("simulations", [])
 if len(simulations) != 100:
@@ -211,7 +212,7 @@ summary = {
     "benchmark": "VitaBench",
     "run_id": run_id,
     "role_models": {"agent": "qwen35-4b-local", "user_simulator": "gpt-4.1", "evaluator": "gpt-4.1"},
-    "agent_inference": {"temperature": 0.0, "thinking": False, "top_p": 1.0, "top_k": 1},
+    "agent_inference": {"temperature": float(agent_temperature), "thinking": False, "top_p": 1.0, "top_k": 1},
     "harness": "vita_rl_state_delta",
     "state_delta_updater": "llm",
     "task_set": "delivery",
