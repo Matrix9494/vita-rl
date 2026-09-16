@@ -44,6 +44,7 @@ OPENROUTER_LOG="$RUN_ROOT/logs/openrouter-proxy.log"
 [[ -x "$VITA_PYTHON" ]] || { echo "Missing VitaBench Python: $VITA_PYTHON" >&2; exit 2; }
 [[ -x "$SGLANG_PYTHON" ]] || { echo "Missing SGLang Python: $SGLANG_PYTHON" >&2; exit 2; }
 [[ -n "${OPENROUTER_API_KEY:-}" ]] || { echo "OPENROUTER_API_KEY is required in-memory" >&2; exit 2; }
+"$REPO/scripts/vessl/bootstrap_sglang_runtime.sh"
 
 mkdir -p "$RUN_ROOT/logs"
 export VITA_RL_ROOT="$REPO"
