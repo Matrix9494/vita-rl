@@ -12,7 +12,9 @@ VITA_PYTHON="${VITA_PYTHON:-/root/venvs/dressage-cu129-py312/bin/python}"
 TOKENIZER="${VITA_INPUT_TOKENIZER_PATH:-/root/models/Qwen3.5-4B}"
 TASK_SET="${VITA_TASK_SET:-delivery}"
 TASK_LANGUAGE="${VITA_TASK_LANGUAGE:-english}"
-TASK_COUNT=100
+TASK_COUNT="${VITA_TASK_COUNT:-100}"
+TASK_IDS_OVERRIDE="${VITA_TASK_IDS:-}"
+RECOVERY_OF="${VITA_RECOVERY_OF:-}"
 SELECTION_SEED=20260906
 MAX_STEPS=100
 CONCURRENCY="${VITA_MAX_CONCURRENCY:-20}"
@@ -145,6 +147,26 @@ Path(output).write_text(json.dumps({
 PY
 
 cd "$VITA_ROOT"
+if [[ -n "$TASK_IDS_OVERRIDE" ]]; then
+    read -r -a TASK_IDS <<< "$TASK_IDS_OVERRIDE"
+    TASK_COUNT="${#TASK_IDS[@]}"
+    [[ "$TASK_COUNT" -gt 0 ]] || { echo "VITA_TASK_IDS did not contain a task ID" >&2; exit 2; }
+    PYTHONPATH="$VITA_ROOT/src" "$VITA_PYTHON" - "$SELECTION" "$TASK_SET" "$TASK_LANGUAGE" "$SELECTION_SEED" "${TASK_IDS[@]}" <<'PY'
+import json
+import sys
+from vita.run import load_tasks
+
+selection_path, task_set, language, seed, *task_ids = sys.argv[1:]
+known = {task.id for task in load_tasks(task_set, language=language)}
+unknown = [task_id for task_id in task_ids if task_id not in known]
+if unknown:
+    raise SystemExit(f"Unknown task IDs for {task_set}/{language}: {unknown}")
+with open(selection_path, "w", encoding="utf-8") as handle:
+    json.dump({"task_set": task_set, "task_language": language, "task_count": len(task_ids),
+               "selection_seed": int(seed), "task_ids": task_ids}, handle, indent=2)
+    handle.write("\n")
+PY
+else
 PYTHONPATH="$VITA_ROOT/src" "$VITA_PYTHON" - "$SELECTION" "$TASK_SET" "$TASK_LANGUAGE" "$TASK_COUNT" "$SELECTION_SEED" <<'PY'
 import json
 import random
@@ -159,6 +181,7 @@ with open(selection_path, "w", encoding="utf-8") as handle:
                "selection_seed": int(seed), "task_ids": [task.id for task in selected]}, handle, indent=2)
     handle.write("\n")
 PY
+fi
 mapfile -t TASK_IDS < <("$VITA_PYTHON" - "$SELECTION" <<'PY'
 import json
 import sys
@@ -177,18 +200,18 @@ PYTHONPATH="$REPO/src:$VITA_ROOT/src" "$VITA_PYTHON" -m vita_rl.vita_cli run \
 REPO_COMMIT="$(git -C "$REPO" rev-parse HEAD)"
 VITABENCH_COMMIT="$(git -C "$VITA_ROOT" rev-parse HEAD)"
 "$VITA_PYTHON" - "$RESULT" "$SUMMARY" "$SELECTION" "$TERRA_SMOKE" "$REPO_COMMIT" "$VITABENCH_COMMIT" \
-    "$RUN_ID" "$CONCURRENCY" "$AGENT_MODEL" "$AGENT_REASONING_EFFORT" <<'PY'
+    "$RUN_ID" "$CONCURRENCY" "$AGENT_MODEL" "$AGENT_REASONING_EFFORT" "$TASK_COUNT" "$RECOVERY_OF" <<'PY'
 import json
 import sys
 from collections import Counter
 from pathlib import Path
 
 (result_path, summary_path, selection_path, smoke_path, repo_commit, vitabench_commit,
- run_id, concurrency, agent_model, reasoning_effort) = sys.argv[1:]
+ run_id, concurrency, agent_model, reasoning_effort, expected_task_count, recovery_of) = sys.argv[1:]
 result = json.loads(Path(result_path).read_text())
 simulations = result.get("simulations", [])
-if len(simulations) != 100:
-    raise SystemExit(f"Expected 100 completed tasks, got {len(simulations)}")
+if len(simulations) != int(expected_task_count):
+    raise SystemExit(f"Expected {expected_task_count} completed tasks, got {len(simulations)}")
 selection = json.loads(Path(selection_path).read_text())
 records = []
 for simulation in simulations:
@@ -232,6 +255,8 @@ summary = {
     },
     "tasks": records,
 }
+if recovery_of:
+    summary["recovery_of"] = recovery_of
 Path(summary_path).write_text(json.dumps(summary, indent=2) + "\n")
 print(f"summary={summary_path}")
 PY
