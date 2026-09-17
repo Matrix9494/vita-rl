@@ -29,7 +29,7 @@ CATEGORIES=(
     memory_kv memory_vector memory_rec_sum
 )
 
-[[ -d "$REPO/.git" ]] || { echo "Missing isolated repository: $REPO" >&2; exit 2; }
+[[ -e "$REPO/.git" ]] || { echo "Missing isolated repository: $REPO" >&2; exit 2; }
 [[ -d "$BFCL_ROOT" ]] || { echo "Missing initialized BFCL submodule: $BFCL_ROOT" >&2; exit 2; }
 [[ -x "$SGLANG_PYTHON" ]] || { echo "Missing Vessl inference Python: $SGLANG_PYTHON" >&2; exit 2; }
 [[ -f "$OVERLAY" && -f "$SUMMARIZER" ]] || { echo "Missing BFCL Vessl support scripts" >&2; exit 2; }
