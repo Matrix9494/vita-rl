@@ -228,7 +228,9 @@ record = {
     "task_id": simulation.get("task_id"),
     "reward": (simulation.get("reward_info") or {}).get("reward"),
     "success": (simulation.get("reward_info") or {}).get("reward") == 1.0,
-    "agent_steps": max(0, len(messages) - 1),
+    # Tool results are individual transcript messages; count only actual
+    # assistant decisions rather than treating every tool payload as a step.
+    "agent_steps": sum(message.get("role") == "assistant" for message in messages),
     "wall_clock_seconds": simulation.get("duration"),
     "prompt_tokens_total": sum(usage.get("prompt_tokens", 0) for usage in usages),
     "output_tokens_total": sum(usage.get("completion_tokens", 0) for usage in usages),
