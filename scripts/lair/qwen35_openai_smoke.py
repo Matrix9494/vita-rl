@@ -190,7 +190,10 @@ def main() -> None:
     output.write_text(json.dumps(result, indent=2) + "\n")
     print(f"qwen35_openai_smoke={output}")
     print(f"tool_calls={len(tool_calls)}")
-    print("reasoning_separated=true")
+    if args.no_thinking_only:
+        print("reasoning_check=skipped_no_thinking")
+    else:
+        print("reasoning_separated=true")
 
 
 if __name__ == "__main__":
