@@ -7,9 +7,11 @@ from vita_rl.harness import (
     register_recent_turns_harness,
     register_summary_harness,
 )
+from vita_rl.deterministic_user import register_deterministic_task_user
 
 
 def main() -> None:
+    register_deterministic_task_user()
     register_standard_harness()
     register_stateful_harness()
     register_summary_harness()

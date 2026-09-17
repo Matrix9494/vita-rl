@@ -1,0 +1,271 @@
+#!/usr/bin/env bash
+# Run one fixed VitaBench delivery task with a public-instruction-only scripted
+# user. OPENROUTER_API_KEY arrives only in this process environment; it is used
+# exclusively by the local evaluator proxy and is never written to disk.
+set -euo pipefail
+
+source /root/setup_env.sh
+
+REPO="${VITA_EVAL_REPO:-${VITA_RL_ROOT:?VITA_RL_ROOT is required}}"
+VITA_ROOT="${VITA_ROOT:?VITA_ROOT is required}"
+SGLANG_PYTHON="${SGLANG_PYTHON:-/root/venvs/dressage-cu129-py312/bin/python}"
+VITA_PYTHON="${VITA_PYTHON:-$SGLANG_PYTHON}"
+MODEL="${QWEN_MODEL:?QWEN_MODEL is required}"
+TASK_SET="${VITA_TASK_SET:-delivery}"
+TASK_LANGUAGE="${VITA_TASK_LANGUAGE:-english}"
+RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-${TASK_SET}-deterministic-user-smoke-$(date -u +%Y%m%dT%H%M%SZ)}"
+RUN_ROOT="${VITA_EVAL_OUTPUT_ROOT:-/root/outputs/vita-rl/vitabench/${RUN_ID}}"
+SELECTION_SEED=20260906
+MAX_STEPS="${VITA_MAX_STEPS:-100}"
+CONCURRENCY="${VITA_MAX_CONCURRENCY:-1}"
+PORT="${SGLANG_PORT:-30000}"
+BASE_URL="http://127.0.0.1:${PORT}/v1"
+
+TEMPERATURE="${VITA_AGENT_TEMPERATURE:-0.7}"
+TOP_P="${VITA_AGENT_TOP_P:-0.8}"
+TOP_K="${VITA_AGENT_TOP_K:-20}"
+MIN_P="${VITA_AGENT_MIN_P:-0.0}"
+PRESENCE_PENALTY="${VITA_AGENT_PRESENCE_PENALTY:-1.5}"
+REPETITION_PENALTY="${VITA_AGENT_REPETITION_PENALTY:-1.0}"
+
+RESULT="$RUN_ROOT/result.json"
+SUMMARY="$RUN_ROOT/summary.json"
+SELECTION="$RUN_ROOT/task-selection.json"
+SGLANG_SMOKE="$RUN_ROOT/sglang-no-thinking-tool-smoke.json"
+REGISTRATION_CHECK="$RUN_ROOT/registration-check.json"
+SGLANG_LOG="$RUN_ROOT/logs/sglang.log"
+OPENROUTER_LOG="$RUN_ROOT/logs/openrouter-proxy.log"
+
+[[ "$TASK_SET" == "delivery" ]] || { echo "This smoke is fixed to delivery, got: $TASK_SET" >&2; exit 2; }
+[[ "$TASK_LANGUAGE" == "english" ]] || { echo "This smoke is fixed to English delivery, got: $TASK_LANGUAGE" >&2; exit 2; }
+[[ "$MAX_STEPS" =~ ^[1-9][0-9]*$ ]] || { echo "VITA_MAX_STEPS must be positive" >&2; exit 2; }
+[[ -d "$REPO" ]] || { echo "Missing evaluation repository: $REPO" >&2; exit 2; }
+[[ -d "$VITA_ROOT" ]] || { echo "Missing VitaBench checkout: $VITA_ROOT" >&2; exit 2; }
+[[ -d "$MODEL" ]] || { echo "Missing model: $MODEL" >&2; exit 2; }
+[[ -x "$VITA_PYTHON" ]] || { echo "Missing VitaBench Python: $VITA_PYTHON" >&2; exit 2; }
+[[ -x "$SGLANG_PYTHON" ]] || { echo "Missing SGLang Python: $SGLANG_PYTHON" >&2; exit 2; }
+[[ -n "${OPENROUTER_API_KEY:-}" ]] || { echo "OPENROUTER_API_KEY is required in-memory" >&2; exit 2; }
+TASK_FILE="$VITA_ROOT/data/vita/domains/delivery/tasks_en.json"
+[[ -f "$TASK_FILE" ]] || { echo "Missing VitaBench English delivery tasks: $TASK_FILE" >&2; exit 2; }
+
+mkdir -p "$RUN_ROOT/logs"
+export VITA_RL_ROOT="$REPO"
+export VITA_INPUT_TOKENIZER_PATH="$MODEL"
+export HF_HOME="${HF_HOME:-/root/.cache/huggingface}"
+export TRANSFORMERS_CACHE="$HF_HOME"
+"$REPO/scripts/vessl/bootstrap_sglang_runtime.sh"
+
+SGLANG_PID=""
+OPENROUTER_PID=""
+OPENROUTER_PORT_FILE=""
+VITA_MODEL_CONFIG=""
+cleanup() {
+    local exit_code=$?
+    [[ -n "$SGLANG_PID" ]] && kill "$SGLANG_PID" 2>/dev/null || true
+    [[ -n "$OPENROUTER_PID" ]] && kill "$OPENROUTER_PID" 2>/dev/null || true
+    [[ -z "$OPENROUTER_PORT_FILE" ]] || rm -f "$OPENROUTER_PORT_FILE"
+    [[ -z "$VITA_MODEL_CONFIG" ]] || rm -f "$VITA_MODEL_CONFIG"
+    exit "$exit_code"
+}
+trap cleanup EXIT INT TERM
+
+"$SGLANG_PYTHON" - <<'PY'
+import sglang
+import torch
+
+if torch.cuda.device_count() != 2:
+    raise SystemExit(f"Expected exactly two Vessl H100s, found {torch.cuda.device_count()}")
+names = [torch.cuda.get_device_name(index) for index in range(2)]
+if not all("H100" in name for name in names):
+    raise SystemExit(f"Expected H100 GPUs, found: {names}")
+print({"sglang": getattr(sglang, "__version__", "unknown"), "gpus": names})
+PY
+
+PYTHONPATH="$REPO/src:$VITA_ROOT/src" "$VITA_PYTHON" - "$REGISTRATION_CHECK" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+from vita.registry import registry
+from vita_rl.deterministic_user import DETERMINISTIC_USER_NAME, DeterministicTaskUser, register_deterministic_task_user
+
+register_deterministic_task_user()
+registered = registry.get_user_constructor(DETERMINISTIC_USER_NAME)
+if registered is not DeterministicTaskUser:
+    raise SystemExit("Deterministic user registry points at an unexpected class")
+Path(sys.argv[1]).write_text(json.dumps({
+    "user": DETERMINISTIC_USER_NAME,
+    "implementation": f"{registered.__module__}.{registered.__name__}",
+    "llm_calls": False,
+}, indent=2) + "\n")
+PY
+
+# Only this proxy inherits the raw credential. The benchmark and model server
+# receive a disposable local credential after the proxy is ready.
+OPENROUTER_PORT_FILE="$(mktemp /tmp/vita-rl-openrouter.XXXXXX)"
+"$VITA_PYTHON" "$REPO/scripts/openrouter_proxy.py" --port-file "$OPENROUTER_PORT_FILE" \
+    >"$OPENROUTER_LOG" 2>&1 &
+OPENROUTER_PID=$!
+for _ in $(seq 1 100); do
+    [[ -s "$OPENROUTER_PORT_FILE" ]] && break
+    kill -0 "$OPENROUTER_PID" 2>/dev/null || { echo "OpenRouter proxy exited early" >&2; exit 1; }
+    sleep 0.1
+done
+[[ -s "$OPENROUTER_PORT_FILE" ]] || { echo "OpenRouter proxy startup timed out" >&2; exit 1; }
+
+VITA_MODEL_CONFIG="$(mktemp /tmp/vita-rl-models.XXXXXX.yaml)"
+"$VITA_PYTHON" - "$VITA_MODEL_CONFIG" "$(<"$OPENROUTER_PORT_FILE")" "$BASE_URL/chat/completions" \
+    "$TEMPERATURE" "$TOP_P" "$TOP_K" "$MIN_P" "$PRESENCE_PENALTY" "$REPETITION_PENALTY" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+(path, proxy_port, agent_endpoint, temperature, top_p, top_k, min_p,
+ presence_penalty, repetition_penalty) = sys.argv[1:]
+config = {
+    "default": {
+        "base_url": f"http://127.0.0.1:{proxy_port}/v1/chat/completions",
+        "temperature": 0.0,
+        "headers": {"Authorization": "Bearer vita-rl-local-proxy", "Content-Type": "application/json"},
+    },
+    "models": [{
+        "name": "gpt-4.1", "max_tokens": 4096, "max_input_tokens": 32768,
+    }, {
+        "name": "qwen35-4b-local", "base_url": agent_endpoint,
+        "temperature": float(temperature), "top_p": float(top_p), "top_k": int(top_k),
+        "min_p": float(min_p), "presence_penalty": float(presence_penalty),
+        "repetition_penalty": float(repetition_penalty), "n": 1,
+        "max_tokens": 8192, "max_input_tokens": 65536,
+        "chat_template_kwargs": {"enable_thinking": False},
+        "headers": {"Authorization": "Bearer EMPTY", "Content-Type": "application/json"},
+    }],
+}
+Path(path).write_text(json.dumps(config, indent=2) + "\n")
+PY
+export VITA_MODEL_CONFIG_PATH="$VITA_MODEL_CONFIG"
+unset OPENROUTER_API_KEY
+
+cd "$VITA_ROOT"
+PYTHONPATH="$VITA_ROOT/src" "$VITA_PYTHON" - "$SELECTION" <<'PY'
+import json
+import random
+import sys
+from vita.run import load_tasks
+
+tasks = load_tasks("delivery", language="english")
+selected = random.Random(20260906).sample(tasks, 100)
+payload = {
+    "task_set": "delivery", "task_language": "english", "selection_seed": 20260906,
+    "candidate_task_count": 100, "candidate_task_ids": [task.id for task in selected],
+    "task_count": 1, "task_ids": [selected[0].id],
+}
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2)
+    handle.write("\n")
+PY
+TASK_ID="$("$VITA_PYTHON" - "$SELECTION" <<'PY'
+import json
+import sys
+selection = json.load(open(sys.argv[1], encoding="utf-8"))
+if len(selection["task_ids"]) != 1 or len(selection["candidate_task_ids"]) != 100:
+    raise SystemExit("Expected one smoke task from a 100-task seeded manifest")
+print(selection["task_ids"][0])
+PY
+)"
+
+"$SGLANG_PYTHON" -m sglang.launch_server \
+    --model-path "$MODEL" --host 127.0.0.1 --port "$PORT" --dp-size 2 \
+    --mem-fraction-static 0.32 --tool-call-parser qwen3_coder --reasoning-parser qwen3 \
+    >"$SGLANG_LOG" 2>&1 &
+SGLANG_PID=$!
+for _ in $(seq 1 240); do
+    curl --fail --silent --show-error --max-time 5 "$BASE_URL/models" >/dev/null 2>&1 && break
+    kill -0 "$SGLANG_PID" 2>/dev/null || { echo "SGLang exited early; see $SGLANG_LOG" >&2; exit 1; }
+    sleep 2
+done
+curl --fail --silent --show-error --max-time 5 "$BASE_URL/models" >/dev/null || {
+    echo "SGLang startup timed out; see $SGLANG_LOG" >&2; exit 1;
+}
+
+"$VITA_PYTHON" "$REPO/scripts/lair/qwen35_openai_smoke.py" \
+    --base-url "$BASE_URL" --model qwen35-4b-local --output "$SGLANG_SMOKE" --no-thinking-only
+
+PYTHONPATH="$REPO/src:$VITA_ROOT/src" "$VITA_PYTHON" -m vita_rl.vita_cli run \
+    --domain delivery --task-set-name delivery --task-ids "$TASK_ID" \
+    --agent llm_agent --agent-llm qwen35-4b-local \
+    --user vita_rl_deterministic_task_user --user-llm deterministic-local-script \
+    --evaluator-llm gpt-4.1 --max-steps "$MAX_STEPS" --num-trials 1 \
+    --max-concurrency "$CONCURRENCY" --language english --save-to "$RESULT"
+
+REPO_COMMIT="$(git -C "$REPO" rev-parse HEAD)"
+VITABENCH_COMMIT="$(git -C "$VITA_ROOT" rev-parse HEAD)"
+"$VITA_PYTHON" - "$RESULT" "$SUMMARY" "$SELECTION" "$SGLANG_SMOKE" "$REGISTRATION_CHECK" \
+    "$REPO_COMMIT" "$VITABENCH_COMMIT" "$RUN_ID" "$MAX_STEPS" "$CONCURRENCY" \
+    "$TEMPERATURE" "$TOP_P" "$TOP_K" "$MIN_P" "$PRESENCE_PENALTY" "$REPETITION_PENALTY" <<'PY'
+import json
+import sys
+from collections import Counter
+from pathlib import Path
+
+(result_path, summary_path, selection_path, smoke_path, registration_path, repo_commit,
+ vitabench_commit, run_id, max_steps, concurrency, temperature, top_p, top_k, min_p,
+ presence_penalty, repetition_penalty) = sys.argv[1:]
+result = json.loads(Path(result_path).read_text())
+simulations = result.get("simulations", [])
+if len(simulations) != 1:
+    raise SystemExit(f"Expected exactly one completed smoke task, got {len(simulations)}")
+selection = json.loads(Path(selection_path).read_text())
+simulation = simulations[0]
+messages = simulation.get("messages", [])
+user_messages = [message for message in messages if message.get("role") == "user"]
+for message in user_messages:
+    raw_data = message.get("raw_data") or {}
+    usage = message.get("usage") or {}
+    if raw_data.get("llm_called") is not False or any(usage.get(key, 0) != 0 for key in ("prompt_tokens", "completion_tokens", "total_tokens")):
+        raise SystemExit("A deterministic-user record contained model usage or lacked its no-LLM marker")
+usages = [message.get("usage") or {} for message in messages]
+record = {
+    "task_id": simulation.get("task_id"),
+    "reward": (simulation.get("reward_info") or {}).get("reward"),
+    "success": (simulation.get("reward_info") or {}).get("reward") == 1.0,
+    "agent_steps": max(0, len(messages) - 1),
+    "wall_clock_seconds": simulation.get("duration"),
+    "prompt_tokens_total": sum(usage.get("prompt_tokens", 0) for usage in usages),
+    "output_tokens_total": sum(usage.get("completion_tokens", 0) for usage in usages),
+    "tool_error_count": sum(bool(message.get("error")) for message in messages if message.get("role") == "tool"),
+    "termination_reason": simulation.get("termination_reason"),
+}
+summary = {
+    "benchmark": "VitaBench",
+    "run_id": run_id,
+    "comparison_label": "deterministic-repeated-reminder; not comparable to GPT-4.1-user results",
+    "role_models": {"agent": "qwen35-4b-local", "user_simulator": "deterministic-local-script", "evaluator": "gpt-4.1"},
+    "user_simulator": {
+        "implementation": "vita_rl_deterministic_task_user", "llm_calls": False,
+        "policy": "instructions_once_then_repeat_fixed_reminder_until_max_steps",
+        "hidden_state_access": False, "user_turn_count": len(user_messages),
+        "user_prompt_tokens": 0, "user_output_tokens": 0, "user_cost": 0.0,
+    },
+    "agent_inference": {
+        "temperature": float(temperature), "top_p": float(top_p), "top_k": int(top_k), "min_p": float(min_p),
+        "presence_penalty": float(presence_penalty), "repetition_penalty": float(repetition_penalty),
+        "thinking": False, "max_tokens": 8192,
+    },
+    "harness": "llm_agent",
+    "task_set": selection["task_set"], "task_language": selection["task_language"],
+    "selection_seed": selection["selection_seed"], "candidate_task_count": selection["candidate_task_count"],
+    "task_count": 1, "max_steps": int(max_steps), "requested_concurrency": int(concurrency),
+    "result_file": result_path, "task_selection_file": selection_path,
+    "sglang_smoke_file": smoke_path, "registration_check_file": registration_path,
+    "provenance": {"vita_rl_commit": repo_commit, "vitabench_commit": vitabench_commit},
+    "aggregate": {
+        "successes": int(record["success"]), "mean_reward": record["reward"] or 0.0,
+        "termination_reasons": dict(Counter([record["termination_reason"]])),
+        "tool_error_count": record["tool_error_count"], "agent_steps": record["agent_steps"],
+        "prompt_tokens": record["prompt_tokens_total"], "output_tokens": record["output_tokens_total"],
+    },
+    "tasks": [record],
+}
+Path(summary_path).write_text(json.dumps(summary, indent=2) + "\n")
+print(f"summary={summary_path}")
+PY

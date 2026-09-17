@@ -31,6 +31,11 @@ def main() -> None:
     parser.add_argument("--base-url", required=True, help="OpenAI /v1 base URL")
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--no-thinking-only",
+        action="store_true",
+        help="Validate native tool calls without issuing the separate thinking-enabled probe.",
+    )
     args = parser.parse_args()
 
     tool_response = request(
@@ -136,34 +141,40 @@ def main() -> None:
             "Tool continuation smoke failed: no final assistant content after tool result"
         )
 
-    reasoning_response = request(
-        args.base_url,
-        {
-            "model": args.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Briefly compute 7 times 8, then give only the answer.",
-                }
-            ],
-            "temperature": 0.0,
-            "max_tokens": 512,
-            "chat_template_kwargs": {"enable_thinking": True},
-        },
-    )
-    reasoning_message = message(reasoning_response)
-    reasoning_content = reasoning_message.get("reasoning_content")
-    final_content = reasoning_message.get("content") or ""
-    if not reasoning_content:
-        raise RuntimeError(
-            "Reasoning smoke failed: response did not expose message.reasoning_content"
+    reasoning = {"skipped": True, "reason": "no_thinking_only"}
+    if not args.no_thinking_only:
+        reasoning_response = request(
+            args.base_url,
+            {
+                "model": args.model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Briefly compute 7 times 8, then give only the answer.",
+                    }
+                ],
+                "temperature": 0.0,
+                "max_tokens": 512,
+                "chat_template_kwargs": {"enable_thinking": True},
+            },
         )
-    if not final_content:
-        raise RuntimeError("Reasoning smoke failed: response did not contain final content")
-    if "<think" in final_content.lower() or "</think" in final_content.lower():
-        raise RuntimeError(
-            "Reasoning smoke failed: raw thinking tags leaked into message.content"
-        )
+        reasoning_message = message(reasoning_response)
+        reasoning_content = reasoning_message.get("reasoning_content")
+        final_content = reasoning_message.get("content") or ""
+        if not reasoning_content:
+            raise RuntimeError(
+                "Reasoning smoke failed: response did not expose message.reasoning_content"
+            )
+        if not final_content:
+            raise RuntimeError("Reasoning smoke failed: response did not contain final content")
+        if "<think" in final_content.lower() or "</think" in final_content.lower():
+            raise RuntimeError(
+                "Reasoning smoke failed: raw thinking tags leaked into message.content"
+            )
+        reasoning = {
+            "reasoning_content": reasoning_content,
+            "content": final_content,
+        }
 
     result = {
         "tool": {
@@ -172,10 +183,7 @@ def main() -> None:
             "content": tool_content,
             "continuation_content": continuation_content,
         },
-        "reasoning": {
-            "reasoning_content": reasoning_content,
-            "content": final_content,
-        },
+        "reasoning": reasoning,
     }
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
