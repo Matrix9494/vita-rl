@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Run one fixed VitaBench delivery task with a public-instruction-only scripted
-# user. OPENROUTER_API_KEY arrives only in this process environment; it is used
-# exclusively by the local evaluator proxy and is never written to disk.
+# Run a fixed-size VitaBench delivery evaluation with a public-instruction-only
+# scripted user. OPENROUTER_API_KEY arrives only in this process environment;
+# it is used exclusively by the local evaluator proxy and is never written.
 set -euo pipefail
 
 source /root/setup_env.sh
@@ -13,9 +13,10 @@ VITA_PYTHON="${VITA_PYTHON:-$SGLANG_PYTHON}"
 MODEL="${QWEN_MODEL:?QWEN_MODEL is required}"
 TASK_SET="${VITA_TASK_SET:-delivery}"
 TASK_LANGUAGE="${VITA_TASK_LANGUAGE:-english}"
-RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-${TASK_SET}-deterministic-user-smoke-$(date -u +%Y%m%dT%H%M%SZ)}"
+RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-${TASK_SET}-deterministic-user-$(date -u +%Y%m%dT%H%M%SZ)}"
 RUN_ROOT="${VITA_EVAL_OUTPUT_ROOT:-/root/outputs/vita-rl/vitabench/${RUN_ID}}"
 SELECTION_SEED=20260906
+TASK_COUNT="${VITA_TASK_COUNT:-1}"
 MAX_STEPS="${VITA_MAX_STEPS:-100}"
 CONCURRENCY="${VITA_MAX_CONCURRENCY:-1}"
 PORT="${SGLANG_PORT:-30000}"
@@ -36,8 +37,9 @@ REGISTRATION_CHECK="$RUN_ROOT/registration-check.json"
 SGLANG_LOG="$RUN_ROOT/logs/sglang.log"
 OPENROUTER_LOG="$RUN_ROOT/logs/openrouter-proxy.log"
 
-[[ "$TASK_SET" == "delivery" ]] || { echo "This smoke is fixed to delivery, got: $TASK_SET" >&2; exit 2; }
-[[ "$TASK_LANGUAGE" == "english" ]] || { echo "This smoke is fixed to English delivery, got: $TASK_LANGUAGE" >&2; exit 2; }
+[[ "$TASK_SET" == "delivery" ]] || { echo "This runner is fixed to delivery, got: $TASK_SET" >&2; exit 2; }
+[[ "$TASK_LANGUAGE" == "english" ]] || { echo "This runner is fixed to English delivery, got: $TASK_LANGUAGE" >&2; exit 2; }
+[[ "$TASK_COUNT" =~ ^[1-9][0-9]*$ ]] && (( TASK_COUNT <= 100 )) || { echo "VITA_TASK_COUNT must be 1 through 100" >&2; exit 2; }
 [[ "$MAX_STEPS" =~ ^[1-9][0-9]*$ ]] || { echo "VITA_MAX_STEPS must be positive" >&2; exit 2; }
 [[ -d "$REPO" ]] || { echo "Missing evaluation repository: $REPO" >&2; exit 2; }
 [[ -d "$VITA_ROOT" ]] || { echo "Missing VitaBench checkout: $VITA_ROOT" >&2; exit 2; }
@@ -146,32 +148,36 @@ export VITA_MODEL_CONFIG_PATH="$VITA_MODEL_CONFIG"
 unset OPENROUTER_API_KEY
 
 cd "$VITA_ROOT"
-PYTHONPATH="$VITA_ROOT/src" "$VITA_PYTHON" - "$SELECTION" <<'PY'
+PYTHONPATH="$VITA_ROOT/src" "$VITA_PYTHON" - "$SELECTION" "$TASK_COUNT" <<'PY'
 import json
 import random
 import sys
 from vita.run import load_tasks
 
+selection_path, task_count = sys.argv[1:]
 tasks = load_tasks("delivery", language="english")
 selected = random.Random(20260906).sample(tasks, 100)
 payload = {
     "task_set": "delivery", "task_language": "english", "selection_seed": 20260906,
     "candidate_task_count": 100, "candidate_task_ids": [task.id for task in selected],
-    "task_count": 1, "task_ids": [selected[0].id],
+    "task_count": int(task_count), "task_ids": [task.id for task in selected[:int(task_count)]],
 }
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
+with open(selection_path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2)
     handle.write("\n")
 PY
-TASK_ID="$("$VITA_PYTHON" - "$SELECTION" <<'PY'
+mapfile -t TASK_IDS < <("$VITA_PYTHON" - "$SELECTION" "$TASK_COUNT" <<'PY'
 import json
 import sys
 selection = json.load(open(sys.argv[1], encoding="utf-8"))
-if len(selection["task_ids"]) != 1 or len(selection["candidate_task_ids"]) != 100:
-    raise SystemExit("Expected one smoke task from a 100-task seeded manifest")
-print(selection["task_ids"][0])
+expected_task_count = int(sys.argv[2])
+if len(selection["task_ids"]) != expected_task_count or len(selection["candidate_task_ids"]) != 100:
+    raise SystemExit("Task manifest did not contain the expected seeded delivery IDs")
+for task_id in selection["task_ids"]:
+    print(task_id)
 PY
-)"
+)
+[[ "${#TASK_IDS[@]}" -eq "$TASK_COUNT" ]] || { echo "Task selection was incomplete" >&2; exit 1; }
 
 "$SGLANG_PYTHON" -m sglang.launch_server \
     --model-path "$MODEL" --host 127.0.0.1 --port "$PORT" --dp-size 2 \
@@ -191,7 +197,7 @@ curl --fail --silent --show-error --max-time 5 "$BASE_URL/models" >/dev/null || 
     --base-url "$BASE_URL" --model qwen35-4b-local --output "$SGLANG_SMOKE" --no-thinking-only
 
 PYTHONPATH="$REPO/src:$VITA_ROOT/src" "$VITA_PYTHON" -m vita_rl.vita_cli run \
-    --domain delivery --task-set-name delivery --task-ids "$TASK_ID" \
+    --domain delivery --task-set-name delivery --task-ids "${TASK_IDS[@]}" \
     --agent llm_agent --agent-llm qwen35-4b-local \
     --user vita_rl_deterministic_task_user --user-llm deterministic-local-script \
     --evaluator-llm gpt-4.1 --max-steps "$MAX_STEPS" --num-trials 1 \
@@ -210,33 +216,36 @@ from pathlib import Path
 (result_path, summary_path, selection_path, smoke_path, registration_path, repo_commit,
  vitabench_commit, run_id, max_steps, concurrency, temperature, top_p, top_k, min_p,
  presence_penalty, repetition_penalty) = sys.argv[1:]
+selection = json.loads(Path(selection_path).read_text())
 result = json.loads(Path(result_path).read_text())
 simulations = result.get("simulations", [])
-if len(simulations) != 1:
-    raise SystemExit(f"Expected exactly one completed smoke task, got {len(simulations)}")
-selection = json.loads(Path(selection_path).read_text())
-simulation = simulations[0]
-messages = simulation.get("messages", [])
-user_messages = [message for message in messages if message.get("role") == "user"]
-for message in user_messages:
-    raw_data = message.get("raw_data") or {}
-    usage = message.get("usage") or {}
-    if raw_data.get("llm_called") is not False or any(usage.get(key, 0) != 0 for key in ("prompt_tokens", "completion_tokens", "total_tokens")):
-        raise SystemExit("A deterministic-user record contained model usage or lacked its no-LLM marker")
-usages = [message.get("usage") or {} for message in messages]
-record = {
-    "task_id": simulation.get("task_id"),
-    "reward": (simulation.get("reward_info") or {}).get("reward"),
-    "success": (simulation.get("reward_info") or {}).get("reward") == 1.0,
-    # Tool results are individual transcript messages; count only actual
-    # assistant decisions rather than treating every tool payload as a step.
-    "agent_steps": sum(message.get("role") == "assistant" for message in messages),
-    "wall_clock_seconds": simulation.get("duration"),
-    "prompt_tokens_total": sum(usage.get("prompt_tokens", 0) for usage in usages),
-    "output_tokens_total": sum(usage.get("completion_tokens", 0) for usage in usages),
-    "tool_error_count": sum(bool(message.get("error")) for message in messages if message.get("role") == "tool"),
-    "termination_reason": simulation.get("termination_reason"),
-}
+expected_ids = selection["task_ids"]
+actual_ids = [simulation.get("task_id") for simulation in simulations]
+if len(simulations) != len(expected_ids) or Counter(actual_ids) != Counter(expected_ids):
+    raise SystemExit("Result records did not exactly match the requested task manifest")
+records = []
+user_turn_count = 0
+for simulation in simulations:
+    messages = simulation.get("messages", [])
+    user_messages = [message for message in messages if message.get("role") == "user"]
+    for message in user_messages:
+        raw_data = message.get("raw_data") or {}
+        usage = message.get("usage") or {}
+        if raw_data.get("llm_called") is not False or any(usage.get(key, 0) != 0 for key in ("prompt_tokens", "completion_tokens", "total_tokens")):
+            raise SystemExit("A deterministic-user record contained model usage or lacked its no-LLM marker")
+    usages = [message.get("usage") or {} for message in messages]
+    records.append({
+        "task_id": simulation.get("task_id"),
+        "reward": (simulation.get("reward_info") or {}).get("reward"),
+        "success": (simulation.get("reward_info") or {}).get("reward") == 1.0,
+        "agent_steps": sum(message.get("role") == "assistant" for message in messages),
+        "wall_clock_seconds": simulation.get("duration"),
+        "prompt_tokens_total": sum(usage.get("prompt_tokens", 0) for usage in usages),
+        "output_tokens_total": sum(usage.get("completion_tokens", 0) for usage in usages),
+        "tool_error_count": sum(bool(message.get("error")) for message in messages if message.get("role") == "tool"),
+        "termination_reason": simulation.get("termination_reason"),
+    })
+    user_turn_count += len(user_messages)
 summary = {
     "benchmark": "VitaBench",
     "run_id": run_id,
@@ -245,7 +254,7 @@ summary = {
     "user_simulator": {
         "implementation": "vita_rl_deterministic_task_user", "llm_calls": False,
         "policy": "instructions_once_then_repeat_fixed_reminder_until_max_steps",
-        "hidden_state_access": False, "user_turn_count": len(user_messages),
+        "hidden_state_access": False, "user_turn_count": user_turn_count,
         "user_prompt_tokens": 0, "user_output_tokens": 0, "user_cost": 0.0,
     },
     "agent_inference": {
@@ -256,17 +265,20 @@ summary = {
     "harness": "llm_agent",
     "task_set": selection["task_set"], "task_language": selection["task_language"],
     "selection_seed": selection["selection_seed"], "candidate_task_count": selection["candidate_task_count"],
-    "task_count": 1, "max_steps": int(max_steps), "requested_concurrency": int(concurrency),
+    "task_count": len(records), "max_steps": int(max_steps), "requested_concurrency": int(concurrency),
     "result_file": result_path, "task_selection_file": selection_path,
     "sglang_smoke_file": smoke_path, "registration_check_file": registration_path,
     "provenance": {"vita_rl_commit": repo_commit, "vitabench_commit": vitabench_commit},
     "aggregate": {
-        "successes": int(record["success"]), "mean_reward": record["reward"] or 0.0,
-        "termination_reasons": dict(Counter([record["termination_reason"]])),
-        "tool_error_count": record["tool_error_count"], "agent_steps": record["agent_steps"],
-        "prompt_tokens": record["prompt_tokens_total"], "output_tokens": record["output_tokens_total"],
+        "successes": sum(record["success"] for record in records),
+        "mean_reward": sum(record["reward"] or 0.0 for record in records) / len(records),
+        "termination_reasons": dict(Counter(record["termination_reason"] for record in records)),
+        "tool_error_count": sum(record["tool_error_count"] for record in records),
+        "agent_steps": sum(record["agent_steps"] for record in records),
+        "prompt_tokens": sum(record["prompt_tokens_total"] for record in records),
+        "output_tokens": sum(record["output_tokens_total"] for record in records),
     },
-    "tasks": [record],
+    "tasks": records,
 }
 Path(summary_path).write_text(json.dumps(summary, indent=2) + "\n")
 print(f"summary={summary_path}")

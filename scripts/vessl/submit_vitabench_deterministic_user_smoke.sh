@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Submit or fetch the single-task Vessl deterministic-user VitaBench smoke.
+# Submit or fetch a Vessl deterministic-user VitaBench delivery evaluation.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 KEY_FILE="${OPENROUTER_KEY_FILE:-$REPO/key}"
 COMMIT="${VITA_EVAL_COMMIT:-$(git -C "$REPO" rev-parse HEAD)}"
-RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-delivery-deterministic-user-smoke-$(date -u +%Y%m%dT%H%M%SZ)}"
+TASK_COUNT="${VITA_TASK_COUNT:-100}"
+CONCURRENCY="${VITA_MAX_CONCURRENCY:-20}"
+RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-delivery-deterministic-user-full-$(date -u +%Y%m%dT%H%M%SZ)}"
 REMOTE_WORKTREE="/root/projects/vita-rl-vita-eval-${COMMIT:0:12}"
 REMOTE_ROOT="/root/outputs/vita-rl/vitabench/${RUN_ID}"
 LOCAL_PARENT="$REPO/outputs/vessl_vitabench"
@@ -41,7 +43,7 @@ REMOTE
 
 # The secret traverses SSH stdin only. It is never passed as an argument,
 # written remotely, added to git, or included in Vessl job metadata/logs.
-remote_command=$(printf 'IFS= read -r OPENROUTER_API_KEY; export OPENROUTER_API_KEY; mkdir -p %q; nohup env VITA_EVAL_REPO=%q VITA_EVAL_OUTPUT_ROOT=%q VITA_EVAL_RUN_ID=%q %q > %q 2>&1 & pid=$!; unset OPENROUTER_API_KEY; printf "pid=%%s run_root=%%s\\n" "$pid" %q' \
-    "$REMOTE_ROOT" "$REMOTE_WORKTREE" "$REMOTE_ROOT" "$RUN_ID" "$REMOTE_RUNNER" "$REMOTE_ROOT/driver.log" "$REMOTE_ROOT")
+remote_command=$(printf 'IFS= read -r OPENROUTER_API_KEY; export OPENROUTER_API_KEY; mkdir -p %q; nohup env VITA_EVAL_REPO=%q VITA_EVAL_OUTPUT_ROOT=%q VITA_EVAL_RUN_ID=%q VITA_TASK_COUNT=%q VITA_MAX_CONCURRENCY=%q %q > %q 2>&1 & pid=$!; unset OPENROUTER_API_KEY; printf "pid=%%s run_root=%%s\\n" "$pid" %q' \
+    "$REMOTE_ROOT" "$REMOTE_WORKTREE" "$REMOTE_ROOT" "$RUN_ID" "$TASK_COUNT" "$CONCURRENCY" "$REMOTE_RUNNER" "$REMOTE_ROOT/driver.log" "$REMOTE_ROOT")
 tr -d '\r\n' < "$KEY_FILE" | ssh vessl-vita "bash -lc $(printf '%q' "$remote_command")"
-echo "Vessl deterministic-user smoke started. Poll driver.log remotely, then run: $0 --fetch"
+echo "Vessl deterministic-user delivery evaluation started. Poll driver.log remotely, then run: $0 --fetch"
