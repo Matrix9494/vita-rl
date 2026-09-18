@@ -249,11 +249,11 @@ for simulation in simulations:
 summary = {
     "benchmark": "VitaBench",
     "run_id": run_id,
-    "comparison_label": "deterministic-repeated-reminder; not comparable to GPT-4.1-user results",
+    "comparison_label": "deterministic-one-shot-autonomous; not comparable to GPT-4.1-user results",
     "role_models": {"agent": "qwen35-4b-local", "user_simulator": "deterministic-local-script", "evaluator": "gpt-4.1"},
     "user_simulator": {
         "implementation": "vita_rl_deterministic_task_user", "llm_calls": False,
-        "policy": "instructions_once_then_repeat_fixed_reminder_until_max_steps",
+        "policy": "instructions_once_then_agent_environment_autonomous_until_agent_stop",
         "hidden_state_access": False, "user_turn_count": user_turn_count,
         "user_prompt_tokens": 0, "user_output_tokens": 0, "user_cost": 0.0,
     },
