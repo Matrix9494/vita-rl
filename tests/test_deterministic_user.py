@@ -11,7 +11,10 @@ pytest.importorskip("vita")
 from vita.data_model.message import AssistantMessage, SystemMessage, ToolCall, ToolMessage, UserMessage
 from vita.data_model.simulation import TerminationReason
 from vita.user.user_simulator import UserSimulator
-from vita_rl.autonomous_user_runner import AutonomousDeterministicOrchestrator
+from vita_rl.autonomous_user_runner import (
+    AUTONOMOUS_EXECUTION_DIRECTIVE,
+    AutonomousDeterministicOrchestrator,
+)
 from vita_rl.deterministic_user import (
     DETERMINISTIC_USER_NAME,
     ZERO_USAGE,
@@ -114,6 +117,8 @@ def test_autonomous_tool_loop_has_no_synthetic_user_turn_between_tools():
     assert orchestrator.done is True
     assert orchestrator.termination_reason == TerminationReason.AGENT_STOP
     assert [message.role for message in orchestrator.trajectory] == ["user", "assistant", "tool", "assistant"]
+    assert len(orchestrator.agent_state.system_messages) == 1
+    assert AUTONOMOUS_EXECUTION_DIRECTIVE in orchestrator.agent_state.system_messages[0].content
     assert isinstance(agent.inputs[0], UserMessage)
     assert isinstance(agent.inputs[1], ToolMessage)
     assert sum(isinstance(message, UserMessage) for message in orchestrator.trajectory) == 1

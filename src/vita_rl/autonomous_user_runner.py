@@ -51,10 +51,13 @@ class AutonomousDeterministicOrchestrator(Orchestrator):
 
     def _append_autonomous_directive(self) -> None:
         system_messages = getattr(self.agent_state, "system_messages", None)
-        if system_messages is None:
+        if not system_messages:
             raise TypeError("The deterministic treatment requires an LLM-style agent state")
-        system_messages.append(
-            type(system_messages[0])(role="system", content=AUTONOMOUS_EXECUTION_DIRECTIVE)
+        # SGLang's OpenAI endpoint permits one leading system message, whereas
+        # multiple system messages are rejected even when contiguous. Preserve
+        # the upstream policy verbatim and extend that same leading message.
+        system_messages[0].content = "\n\n".join(
+            filter(None, [system_messages[0].content, AUTONOMOUS_EXECUTION_DIRECTIVE])
         )
 
     def initialize(self):
