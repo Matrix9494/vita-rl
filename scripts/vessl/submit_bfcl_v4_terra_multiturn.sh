@@ -12,8 +12,10 @@ LOCAL_PARENT="$REPO/outputs/vessl_bfcl"
 REMOTE_RUNNER="$REMOTE_WORKTREE/scripts/vessl/run_bfcl_v4_terra_multiturn.sh"
 
 if [[ "${1:-}" == "--fetch" ]]; then
-    mkdir -p "$LOCAL_PARENT/$RUN_ID"
-    scp -r "vessl-vita:${REMOTE_ROOT}/." "$LOCAL_PARENT/$RUN_ID/"
+    mkdir -p "$LOCAL_PARENT"
+    # Copy the run directory itself.  OpenSSH's SFTP-backed scp rejects a
+    # remote `/.` source, whereas this preserves the intended local run ID.
+    scp -r "vessl-vita:${REMOTE_ROOT}" "$LOCAL_PARENT/"
     echo "Fetched $REMOTE_ROOT to $LOCAL_PARENT/$RUN_ID"
     exit 0
 fi
