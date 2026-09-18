@@ -29,16 +29,15 @@ from vita.user.base import (
 
 
 DETERMINISTIC_USER_NAME = "vita_rl_deterministic_task_user"
-REMINDER = "Please proceed using my original request."
 ZERO_USAGE = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
 class DeterministicTaskUserState(UserState):
     """Conversation state with an explicit disclosure marker.
 
-    ``messages`` remains the upstream user-facing transcript.  The marker is
-    separate so an empty task history can disclose the instructions exactly
-    once, while an authored history containing a user message is left intact.
+    ``messages`` remains the upstream user-facing transcript. The explicit
+    marker distinguishes our initial disclosure from arbitrary authored user
+    turns already present in a task history.
     """
 
     instructions_sent: bool = False
@@ -57,12 +56,17 @@ class DeterministicTaskUser(BaseUser):
         language: Optional[str] = None,
         **_: Any,
     ) -> None:
-        # VitaBench passes persona/language to its LLM user.  Accept them for
-        # constructor compatibility but deliberately do not use either one.
-        del persona, language
-        super().__init__(instructions=instructions, llm=llm, llm_args=llm_args)
+        # VitaBench passes persona/language/model settings to its LLM user.
+        # Accept these solely for constructor compatibility. This treatment
+        # deliberately retains only public instructions and never has a model.
+        del persona, language, llm, llm_args
+        if not isinstance(instructions, str) or not instructions.strip():
+            raise ValueError(
+                "DeterministicTaskUser requires non-empty public task instructions"
+            )
+        super().__init__(instructions=instructions, llm=None, llm_args=None)
 
-    def get_init_state(
+    async def get_init_state(
         self, message_history: Optional[list[Message]] = None
     ) -> DeterministicTaskUserState:
         history = list(message_history or [])
@@ -70,9 +74,14 @@ class DeterministicTaskUser(BaseUser):
             "Invalid user message history. User history must contain only "
             "user messages, non-tool assistant messages, or user-requested tools."
         )
+        instructions_sent = any(
+            isinstance(message, UserMessage)
+            and (message.raw_data or {}).get("implementation") == DETERMINISTIC_USER_NAME
+            for message in history
+        )
         return DeterministicTaskUserState(
             messages=deepcopy(history),
-            instructions_sent=any(isinstance(message, UserMessage) for message in history),
+            instructions_sent=instructions_sent,
         )
 
     @classmethod
@@ -86,29 +95,31 @@ class DeterministicTaskUser(BaseUser):
         # There is no stochastic model call to seed.
         del seed
 
-    def generate_next_message(
-        self, message: ValidUserInputMessage, state: DeterministicTaskUserState
+    async def initial_message(
+        self, state: DeterministicTaskUserState
     ) -> tuple[UserMessage, DeterministicTaskUserState]:
-        if isinstance(message, MultiToolMessage):
-            state.messages.extend(message.tool_messages)
-        else:
-            state.messages.append(message)
-
-        if not state.instructions_sent:
-            response = str(self.instructions or "")
-            state.instructions_sent = True
-        else:
-            response = REMINDER
-
+        """Disclose public instructions once for the autonomous runner."""
+        if state.instructions_sent:
+            raise RuntimeError("Controlled task instructions were already disclosed")
         user_message = UserMessage(
             role="user",
-            content=response,
+            content=self.instructions,
             cost=0.0,
             usage=deepcopy(ZERO_USAGE),
             raw_data={"implementation": DETERMINISTIC_USER_NAME, "llm_called": False},
         )
+        state.instructions_sent = True
         state.messages.append(user_message)
         return user_message, state
+
+    async def generate_next_message(
+        self, message: ValidUserInputMessage, state: DeterministicTaskUserState
+    ) -> tuple[UserMessage, DeterministicTaskUserState]:
+        del message, state
+        raise RuntimeError(
+            "DeterministicTaskUser is non-interactive and must run through "
+            "the vita_rl autonomous deterministic-user orchestrator"
+        )
 
 
 def register_deterministic_task_user() -> None:

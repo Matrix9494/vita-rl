@@ -1,54 +1,140 @@
-"""Focused coverage for the no-LLM VitaBench deterministic user treatment."""
+"""Regression tests for the non-interactive deterministic VitaBench treatment."""
+
+import asyncio
+import inspect
+from types import SimpleNamespace
 
 import pytest
 
 pytest.importorskip("vita")
 
-from vita.data_model.message import AssistantMessage, UserMessage
+from vita.data_model.message import AssistantMessage, SystemMessage, ToolCall, ToolMessage, UserMessage
+from vita.data_model.simulation import TerminationReason
+from vita.user.user_simulator import UserSimulator
+from vita_rl.autonomous_user_runner import AutonomousDeterministicOrchestrator
 from vita_rl.deterministic_user import (
     DETERMINISTIC_USER_NAME,
-    REMINDER,
     ZERO_USAGE,
     DeterministicTaskUser,
-    register_deterministic_task_user,
 )
 
 
-def test_empty_history_discloses_instructions_once_then_repeats_reminder():
-    user = DeterministicTaskUser(instructions="Book mild noodles.", llm="must-not-be-called")
-    state = user.get_init_state()
+class ScriptedAgent:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.inputs = []
 
-    first, state = user.generate_next_message(
-        AssistantMessage(role="assistant", content="How can I help?"), state
+    def get_init_state(self, message_history=None):
+        del message_history
+        return SimpleNamespace(system_messages=[SystemMessage(role="system", content="agent")])
+
+    def generate_next_message(self, message, state):
+        self.inputs.append(message)
+        return self.responses.pop(0), state
+
+    @staticmethod
+    def is_stop(message):
+        return "###STOP###" in (message.content or "")
+
+    def set_seed(self, seed):
+        del seed
+
+
+class LoopingAgent(ScriptedAgent):
+    def __init__(self):
+        super().__init__([])
+
+    def generate_next_message(self, message, state):
+        self.inputs.append(message)
+        return _tool_call(), state
+
+
+def _tool_call():
+    return AssistantMessage(
+        role="assistant",
+        tool_calls=[ToolCall(id="call-1", name="lookup", arguments={})],
     )
-    second, state = user.generate_next_message(
-        AssistantMessage(role="assistant", content="Anything else?"), state
+
+
+class FakeEnvironment:
+    def __init__(self):
+        self.tools = SimpleNamespace(db=SimpleNamespace(time="2025-01-01 00:00:00"))
+
+    def get_response(self, call):
+        return ToolMessage(
+            role="tool", id=call.id, name=call.name, content="observation", requestor="assistant"
+        )
+
+
+def _orchestrator(agent, user, max_steps=10):
+    return AutonomousDeterministicOrchestrator(
+        domain="delivery",
+        agent=agent,
+        user=user,
+        environment=FakeEnvironment(),
+        task=SimpleNamespace(id="controlled-test", message_history=[]),
+        max_steps=max_steps,
     )
 
-    assert first.content == "Book mild noodles."
-    assert second.content == REMINDER
-    assert first.cost == second.cost == 0.0
-    assert first.usage == second.usage == ZERO_USAGE
-    assert first.raw_data["llm_called"] is False
-    assert user.is_stop(second) is False
 
+def test_one_time_disclosure_is_async_and_has_no_model_usage():
+    user = DeterministicTaskUser(instructions="Complete the public task.", llm="ignored")
+    state = asyncio.run(user.get_init_state())
+    initial, state = asyncio.run(user.initial_message(state))
 
-def test_authored_user_history_is_preserved_without_instruction_injection():
-    previous = UserMessage(role="user", content="I already described the issue.")
-    user = DeterministicTaskUser(instructions="Do not repeat this.")
-    state = user.get_init_state([previous])
-    reply, state = user.generate_next_message(
-        AssistantMessage(role="assistant", content="I need more information."), state
-    )
-
+    assert inspect.iscoroutinefunction(DeterministicTaskUser.get_init_state)
+    assert inspect.iscoroutinefunction(DeterministicTaskUser.generate_next_message)
+    assert initial.content == "Complete the public task."
+    assert initial.raw_data == {"implementation": DETERMINISTIC_USER_NAME, "llm_called": False}
+    assert initial.cost == 0.0 and initial.usage == ZERO_USAGE
+    assert user.llm is None and user.llm_args == {}
     assert state.instructions_sent is True
-    assert state.messages[0].content == previous.content
-    assert reply.content == REMINDER
+    with pytest.raises(RuntimeError, match="non-interactive"):
+        asyncio.run(user.generate_next_message(AssistantMessage(role="assistant", content="done"), state))
 
 
-def test_registration_is_idempotent_and_uses_the_expected_name():
-    register_deterministic_task_user()
-    register_deterministic_task_user()
-    from vita.registry import registry
+def test_authored_user_history_does_not_falsely_mark_controlled_disclosure_sent():
+    user = DeterministicTaskUser(instructions="Complete the public task.")
+    state = asyncio.run(
+        user.get_init_state([UserMessage(role="user", content="An authored prior turn")])
+    )
 
-    assert registry.get_user_constructor(DETERMINISTIC_USER_NAME) is DeterministicTaskUser
+    assert state.instructions_sent is False
+    assert state.messages[0].content == "An authored prior turn"
+
+
+def test_autonomous_tool_loop_has_no_synthetic_user_turn_between_tools():
+    agent = ScriptedAgent([_tool_call(), AssistantMessage(role="assistant", content="###STOP###")])
+    orchestrator = _orchestrator(agent, DeterministicTaskUser(instructions="Use tools."))
+    orchestrator.initialize()
+    orchestrator.step()  # initial user -> agent tool call
+    orchestrator.step()  # agent tool call -> environment
+    orchestrator.step()  # environment observation -> agent stop
+
+    assert orchestrator.done is True
+    assert orchestrator.termination_reason == TerminationReason.AGENT_STOP
+    assert [message.role for message in orchestrator.trajectory] == ["user", "assistant", "tool", "assistant"]
+    assert isinstance(agent.inputs[0], UserMessage)
+    assert isinstance(agent.inputs[1], ToolMessage)
+    assert sum(isinstance(message, UserMessage) for message in orchestrator.trajectory) == 1
+
+
+def test_standard_agent_stop_ends_before_max_steps():
+    agent = ScriptedAgent([AssistantMessage(role="assistant", content="Finished. ###STOP###")])
+    simulation = _orchestrator(agent, DeterministicTaskUser(instructions="Finish."), max_steps=10).run()
+
+    assert simulation.termination_reason == TerminationReason.AGENT_STOP.value
+    assert len(simulation.messages) == 2
+
+
+def test_true_tool_loop_still_hits_max_steps_safety_bound():
+    simulation = _orchestrator(LoopingAgent(), DeterministicTaskUser(instructions="Loop."), max_steps=3).run()
+
+    assert simulation.termination_reason == TerminationReason.MAX_STEPS.value
+    assert sum(message.role == "user" for message in simulation.messages) == 1
+
+
+def test_input_validation_and_stock_user_behavior_are_unchanged():
+    with pytest.raises(ValueError, match="non-empty"):
+        DeterministicTaskUser(instructions="  ")
+    assert not inspect.iscoroutinefunction(UserSimulator.generate_next_message)

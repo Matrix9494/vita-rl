@@ -8,10 +8,12 @@ from vita_rl.harness import (
     register_summary_harness,
 )
 from vita_rl.deterministic_user import register_deterministic_task_user
+from vita_rl.autonomous_user_runner import install_autonomous_deterministic_runner
 
 
 def main() -> None:
     register_deterministic_task_user()
+    install_autonomous_deterministic_runner()
     register_standard_harness()
     register_stateful_harness()
     register_summary_harness()
