@@ -277,7 +277,7 @@ if user_implementation == "vita_rl_deterministic_task_user":
     summary["comparison_label"] = "deterministic-one-shot-autonomous; not comparable to GPT-4.1-user results"
     summary["user_simulator"] = {
         "implementation": user_implementation, "llm_calls": False,
-        "policy": "request-plus-public-profile-once_then_one_fact_free_review_then_agent_stop",
+        "policy": "request-plus-public-profile-once_then_two_fact_free_reviews_then_agent_stop",
         "hidden_state_access": False, "user_turn_count": user_turn_count,
         "user_prompt_tokens": 0, "user_output_tokens": 0, "user_cost": 0.0,
     }

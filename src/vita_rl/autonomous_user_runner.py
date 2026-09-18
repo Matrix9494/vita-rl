@@ -32,11 +32,17 @@ AUTONOMOUS_EXECUTION_DIRECTIVE = (
     "the complete request and, when supplied, the user's public profile. No further "
     "user responses will arrive. Use available tools to complete the request. Treat "
     "the profile as user-provided context only when the request leaves a detail "
-    "unspecified; do not invent missing facts. After your first attempted completion, "
-    "you will receive one fact-free request to review your work. Before the final "
-    "response, re-check that every requirement in the request and applicable profile "
-    "context has been carried out. When no further tool action is needed, end your "
-    "final response with ###STOP###."
+    "unspecified; do not invent missing facts. Do not rely on default fields: explicitly "
+    "resolve and set every destination, product attribute, quantity, timing, and order "
+    "status needed by the request. A personal request after work is for home unless it "
+    "explicitly says work or another destination. When a request refers to preferences, "
+    "frequent/recent orders, or availability, use tools to inspect the relevant public "
+    "task-visible information before acting. Do not add constraints that the request or "
+    "profile does not support. After attempted completion, you will receive two "
+    "fact-free requests to inspect and review your work. Before the final response, "
+    "re-check that every requirement in the request and applicable profile context has "
+    "been carried out. When no further tool action is needed, end your final response "
+    "with ###STOP###."
 )
 
 

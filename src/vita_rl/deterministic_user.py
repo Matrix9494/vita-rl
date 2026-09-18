@@ -32,10 +32,11 @@ DETERMINISTIC_USER_NAME = "vita_rl_deterministic_task_user"
 ZERO_USAGE = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 PROFILE_CONTEXT_HEADER = "User profile (use only to resolve details unspecified in the request):"
 REVIEW_REMINDER = (
-    "Before finishing, carefully verify the actions already taken against my original "
-    "request and the public profile I provided. If any requested action, quantity, "
-    "location, constraint, or timing is incomplete or incorrect, use the tools now "
-    "to correct it. Otherwise, finish the task."
+    "Before finishing, do not merely restate or assert that the work is correct. Use "
+    "the tools to inspect the actual task-visible state and verify it line by line "
+    "against my original request and public profile. If any requested action, quantity, "
+    "location, product attribute, constraint, timing, or status is incomplete or "
+    "incorrect, use the tools now to correct it. Otherwise, finish the task."
 )
 
 
@@ -48,7 +49,7 @@ class DeterministicTaskUserState(UserState):
     """
 
     instructions_sent: bool = False
-    review_turns_remaining: int = 1
+    review_turns_remaining: int = 2
     system_messages: list[SystemMessage] = Field(default_factory=list)
 
 
@@ -138,10 +139,10 @@ class DeterministicTaskUser(BaseUser):
     async def review_message(
         self, state: DeterministicTaskUserState
     ) -> tuple[UserMessage, DeterministicTaskUserState]:
-        """Give one generic, fact-free execution review request.
+        """Give a bounded generic, fact-free execution review request.
 
-        The message is intentionally invariant across tasks: it neither reads
-        environment/evaluator state nor derives any task-specific correction.
+        The message is invariant across tasks: it neither reads environment or
+        evaluator state nor derives task-specific corrections.
         """
         if state.review_turns_remaining < 1:
             raise RuntimeError("No deterministic review turns remain")
