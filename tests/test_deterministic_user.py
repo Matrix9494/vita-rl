@@ -114,17 +114,15 @@ def test_initial_disclosure_includes_only_supplied_public_profile():
     assert "evaluation" not in initial.content.lower()
 
 
-def test_reviews_are_bounded_fact_free_and_have_no_model_usage():
+def test_review_is_bounded_fact_free_and_has_no_model_usage():
     user = DeterministicTaskUser(instructions="Complete the task.")
     state = asyncio.run(user.get_init_state())
     review, state = asyncio.run(user.review_message(state))
-    second_review, state = asyncio.run(user.review_message(state))
 
     assert review.content == REVIEW_REMINDER
     assert review.usage == ZERO_USAGE and review.cost == 0.0
     assert review.raw_data["llm_called"] is False
     assert review.raw_data["message_kind"] == "fact_free_review"
-    assert second_review.content == REVIEW_REMINDER
     with pytest.raises(RuntimeError, match="No deterministic review"):
         asyncio.run(user.review_message(state))
 
@@ -139,41 +137,38 @@ def test_authored_user_history_does_not_falsely_mark_controlled_disclosure_sent(
     assert state.messages[0].content == "An authored prior turn"
 
 
-def test_autonomous_tool_loop_has_only_bounded_review_turns_after_tools():
+def test_autonomous_tool_loop_has_no_synthetic_user_turn_between_tools():
     agent = ScriptedAgent([
         _tool_call(),
         AssistantMessage(role="assistant", content="###STOP###"),
-        AssistantMessage(role="assistant", content="First review. ###STOP###"),
-        AssistantMessage(role="assistant", content="Second review. ###STOP###"),
+        AssistantMessage(role="assistant", content="Reviewed. ###STOP###"),
     ])
     orchestrator = _orchestrator(agent, DeterministicTaskUser(instructions="Use tools."))
     orchestrator.initialize()
     orchestrator.step()  # initial user -> agent tool call
     orchestrator.step()  # agent tool call -> environment
     orchestrator.step()  # environment observation -> agent first completion
-    orchestrator.step()  # first bounded review -> agent response
-    orchestrator.step()  # second bounded review -> agent stop
+    orchestrator.step()  # bounded review -> agent stop
 
     assert orchestrator.done is True
     assert orchestrator.termination_reason == TerminationReason.AGENT_STOP
-    assert [message.role for message in orchestrator.trajectory] == ["user", "assistant", "tool", "assistant", "user", "assistant", "user", "assistant"]
+    assert [message.role for message in orchestrator.trajectory] == ["user", "assistant", "tool", "assistant", "user", "assistant"]
     assert len(orchestrator.agent_state.system_messages) == 1
     assert AUTONOMOUS_EXECUTION_DIRECTIVE in orchestrator.agent_state.system_messages[0].content
     assert isinstance(agent.inputs[0], UserMessage)
     assert isinstance(agent.inputs[1], ToolMessage)
-    assert sum(isinstance(message, UserMessage) for message in orchestrator.trajectory) == 3
+    assert sum(isinstance(message, UserMessage) for message in orchestrator.trajectory) == 2
 
 
-def test_two_reviews_occur_before_agent_stop():
+def test_one_review_occurs_before_agent_stop():
     agent = ScriptedAgent([
         AssistantMessage(role="assistant", content="Finished. ###STOP###"),
-        AssistantMessage(role="assistant", content="First review. ###STOP###"),
-        AssistantMessage(role="assistant", content="Second review. ###STOP###"),
+        AssistantMessage(role="assistant", content="Reviewed. ###STOP###"),
     ])
     simulation = _orchestrator(agent, DeterministicTaskUser(instructions="Finish."), max_steps=10).run()
 
     assert simulation.termination_reason == TerminationReason.AGENT_STOP.value
-    assert [message.role for message in simulation.messages] == ["user", "assistant", "user", "assistant", "user", "assistant"]
+    assert [message.role for message in simulation.messages] == ["user", "assistant", "user", "assistant"]
     assert simulation.messages[2].content == REVIEW_REMINDER
 
 
