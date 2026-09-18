@@ -32,9 +32,11 @@ AUTONOMOUS_EXECUTION_DIRECTIVE = (
     "the complete request and, when supplied, the user's public profile. No further "
     "user responses will arrive. Use available tools to complete the request. Treat "
     "the profile as user-provided context only when the request leaves a detail "
-    "unspecified; do not invent missing facts. Before stopping, re-check that every "
-    "requirement in the request and applicable profile context has been carried out. "
-    "When no further tool action is needed, end your final response with ###STOP###."
+    "unspecified; do not invent missing facts. After your first attempted completion, "
+    "you will receive one fact-free request to review your work. Before the final "
+    "response, re-check that every requirement in the request and applicable profile "
+    "context has been carried out. When no further tool action is needed, end your "
+    "final response with ###STOP###."
 )
 
 
@@ -141,14 +143,17 @@ class AutonomousDeterministicOrchestrator(Orchestrator):
             self.trajectory.append(agent_message)
             self.message = agent_message
             self.from_role = Role.AGENT
-            if self.agent.is_stop(agent_message):
-                self.done = True
-                self.termination_reason = TerminationReason.AGENT_STOP
-            elif agent_message.is_tool_call():
+            if agent_message.is_tool_call():
                 self.to_role = Role.ENV
+            elif self.user_state.review_turns_remaining:
+                review_message, self.user_state = _await(self.user.review_message(self.user_state))
+                review_message.timestamp = get_now()
+                self.trajectory.append(review_message)
+                self.message = review_message
+                self.from_role, self.to_role = Role.USER, Role.AGENT
             else:
                 # A non-tool response is the agent's only possible terminal
-                # completion in an intentionally non-interactive episode.
+                # completion after the bounded fact-free review.
                 self.done = True
                 self.termination_reason = TerminationReason.AGENT_STOP
         elif self.from_role == Role.AGENT and self.to_role == Role.ENV:

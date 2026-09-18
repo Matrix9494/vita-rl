@@ -31,6 +31,12 @@ from vita.user.base import (
 DETERMINISTIC_USER_NAME = "vita_rl_deterministic_task_user"
 ZERO_USAGE = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 PROFILE_CONTEXT_HEADER = "User profile (use only to resolve details unspecified in the request):"
+REVIEW_REMINDER = (
+    "Before finishing, carefully verify the actions already taken against my original "
+    "request and the public profile I provided. If any requested action, quantity, "
+    "location, constraint, or timing is incomplete or incorrect, use the tools now "
+    "to correct it. Otherwise, finish the task."
+)
 
 
 class DeterministicTaskUserState(UserState):
@@ -42,6 +48,7 @@ class DeterministicTaskUserState(UserState):
     """
 
     instructions_sent: bool = False
+    review_turns_remaining: int = 1
     system_messages: list[SystemMessage] = Field(default_factory=list)
 
 
@@ -127,6 +134,28 @@ class DeterministicTaskUser(BaseUser):
             "DeterministicTaskUser is non-interactive and must run through "
             "the vita_rl autonomous deterministic-user orchestrator"
         )
+
+    async def review_message(
+        self, state: DeterministicTaskUserState
+    ) -> tuple[UserMessage, DeterministicTaskUserState]:
+        """Give one generic, fact-free execution review request.
+
+        The message is intentionally invariant across tasks: it neither reads
+        environment/evaluator state nor derives any task-specific correction.
+        """
+        if state.review_turns_remaining < 1:
+            raise RuntimeError("No deterministic review turns remain")
+        user_message = UserMessage(
+            role="user",
+            content=REVIEW_REMINDER,
+            cost=0.0,
+            usage=deepcopy(ZERO_USAGE),
+            raw_data={"implementation": DETERMINISTIC_USER_NAME, "llm_called": False,
+                      "message_kind": "fact_free_review"},
+        )
+        state.review_turns_remaining -= 1
+        state.messages.append(user_message)
+        return user_message, state
 
 
 def register_deterministic_task_user() -> None:

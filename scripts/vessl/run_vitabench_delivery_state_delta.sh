@@ -254,7 +254,7 @@ summary = {
     "comparison_label": "deterministic-public-context autonomous; not comparable to GPT-4.1-user results",
     "role_models": {"agent": "qwen35-4b-local", "user_simulator": "deterministic-local-script", "evaluator": "gpt-4.1"},
     "user_simulator": {"implementation": "vita_rl_deterministic_task_user", "llm_calls": False,
-                       "policy": "request-plus-public-profile-once_then_agent_environment_autonomous_until_agent_stop",
+                       "policy": "request-plus-public-profile-once_then_one_fact_free_review_then_agent_stop",
                        "user_turn_count": user_turn_count, "user_prompt_tokens": 0, "user_output_tokens": 0, "user_cost": 0.0},
     "agent_inference": {"temperature": float(agent_temperature), "thinking": False, "top_p": float(top_p), "top_k": int(top_k),
                         "min_p": float(min_p), "presence_penalty": float(presence_penalty), "repetition_penalty": float(repetition_penalty)},
