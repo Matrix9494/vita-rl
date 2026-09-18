@@ -7,8 +7,12 @@ KEY_FILE="${OPENROUTER_KEY_FILE:-$REPO/key}"
 COMMIT="${VITA_EVAL_COMMIT:-$(git -C "$REPO" rev-parse HEAD)}"
 TASK_SET="${VITA_TASK_SET:-delivery}"
 TASK_LANGUAGE="${VITA_TASK_LANGUAGE:-english}"
+TASK_COUNT="${VITA_TASK_COUNT:-100}"
+CONCURRENCY="${VITA_MAX_CONCURRENCY:-20}"
 TASK_IDS_OVERRIDE="${VITA_TASK_IDS:-}"
 RECOVERY_OF="${VITA_RECOVERY_OF:-}"
+USER_IMPLEMENTATION="${VITA_USER_IMPLEMENTATION:-user_simulator}"
+USER_LLM="${VITA_USER_LLM:-gpt-4.1}"
 RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-${TASK_SET}-terra-upper-bound-$(date -u +%Y%m%dT%H%M%SZ)}"
 REMOTE_WORKTREE="/root/projects/vita-rl-vita-eval-${COMMIT:0:12}"
 REMOTE_ROOT="/root/outputs/vita-rl/vitabench/${RUN_ID}"
@@ -45,7 +49,7 @@ REMOTE
 
 # Transfer the raw secret only via stdin. It is never a remote argument, file,
 # Vessl metadata value, or log entry.
-remote_command=$(printf 'IFS= read -r OPENROUTER_API_KEY; export OPENROUTER_API_KEY; mkdir -p %q; nohup env VITA_EVAL_REPO=%q VITA_EVAL_OUTPUT_ROOT=%q VITA_EVAL_RUN_ID=%q VITA_TASK_SET=%q VITA_TASK_LANGUAGE=%q VITA_TASK_IDS=%q VITA_RECOVERY_OF=%q %q > %q 2>&1 & pid=$!; unset OPENROUTER_API_KEY; printf "pid=%%s run_root=%%s\\n" "$pid" %q' \
-    "$REMOTE_ROOT" "$REMOTE_WORKTREE" "$REMOTE_ROOT" "$RUN_ID" "$TASK_SET" "$TASK_LANGUAGE" "$TASK_IDS_OVERRIDE" "$RECOVERY_OF" "$REMOTE_RUNNER" "$REMOTE_ROOT/driver.log" "$REMOTE_ROOT")
+remote_command=$(printf 'IFS= read -r OPENROUTER_API_KEY; export OPENROUTER_API_KEY; mkdir -p %q; nohup env VITA_EVAL_REPO=%q VITA_EVAL_OUTPUT_ROOT=%q VITA_EVAL_RUN_ID=%q VITA_TASK_SET=%q VITA_TASK_LANGUAGE=%q VITA_TASK_COUNT=%q VITA_MAX_CONCURRENCY=%q VITA_TASK_IDS=%q VITA_RECOVERY_OF=%q VITA_USER_IMPLEMENTATION=%q VITA_USER_LLM=%q %q > %q 2>&1 & pid=$!; unset OPENROUTER_API_KEY; printf "pid=%%s run_root=%%s\\n" "$pid" %q' \
+    "$REMOTE_ROOT" "$REMOTE_WORKTREE" "$REMOTE_ROOT" "$RUN_ID" "$TASK_SET" "$TASK_LANGUAGE" "$TASK_COUNT" "$CONCURRENCY" "$TASK_IDS_OVERRIDE" "$RECOVERY_OF" "$USER_IMPLEMENTATION" "$USER_LLM" "$REMOTE_RUNNER" "$REMOTE_ROOT/driver.log" "$REMOTE_ROOT")
 tr -d '\r\n' < "$KEY_FILE" | ssh vessl-vita "bash -lc $(printf '%q' "$remote_command")"
 echo "Vessl Terra evaluation started. Poll driver.log remotely, then run: $0 --fetch"

@@ -19,6 +19,7 @@ HANDLER_SOURCE = dedent(
     r'''
     """BFCL adapter for a locally served Qwen3.5 function-calling model."""
 
+    import fcntl
     import json
     import os
     import threading
@@ -104,8 +105,16 @@ HANDLER_SOURCE = dedent(
             payload = api_response.model_dump(mode="json") if hasattr(api_response, "model_dump") else api_response
             path = Path(trace_path)
             path.parent.mkdir(parents=True, exist_ok=True)
+            # BFCL can invoke this handler from multiple worker processes.
+            # A thread lock alone cannot prevent adjacent JSON objects from
+            # being interleaved, so use an advisory process-wide file lock.
             with _TRACE_LOCK, path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\\n")
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\\n")
+                    handle.flush()
+                finally:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
     '''
 ).lstrip()
 

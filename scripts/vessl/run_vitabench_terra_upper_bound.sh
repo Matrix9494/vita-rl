@@ -20,6 +20,8 @@ MAX_STEPS=100
 CONCURRENCY="${VITA_MAX_CONCURRENCY:-20}"
 AGENT_MODEL="openai/gpt-5.6-terra"
 AGENT_REASONING_EFFORT="${VITA_TERRA_REASONING_EFFORT:-high}"
+USER_IMPLEMENTATION="${VITA_USER_IMPLEMENTATION:-user_simulator}"
+USER_LLM="${VITA_USER_LLM:-gpt-4.1}"
 RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-${TASK_SET}-terra-upper-bound-$(date -u +%Y%m%dT%H%M%SZ)}"
 RUN_ROOT="${VITA_EVAL_OUTPUT_ROOT:-/root/outputs/vita-rl/vitabench/${RUN_ID}}"
 
@@ -30,6 +32,10 @@ esac
 case "$TASK_LANGUAGE" in
     english|chinese) ;;
     *) echo "VITA_TASK_LANGUAGE must be english or chinese, got: $TASK_LANGUAGE" >&2; exit 2 ;;
+esac
+case "$USER_IMPLEMENTATION" in
+    user_simulator|vita_rl_deterministic_task_user) ;;
+    *) echo "Unsupported VITA_USER_IMPLEMENTATION: $USER_IMPLEMENTATION" >&2; exit 2 ;;
 esac
 
 RESULT="$RUN_ROOT/result.json"
@@ -193,45 +199,57 @@ PY
 
 PYTHONPATH="$REPO/src:$VITA_ROOT/src" "$VITA_PYTHON" -m vita_rl.vita_cli run \
     --domain "$TASK_SET" --task-set-name "$TASK_SET" --task-ids "${TASK_IDS[@]}" \
-    --agent llm_agent --agent-llm "$AGENT_MODEL" --user-llm gpt-4.1 --evaluator-llm gpt-4.1 \
+    --agent llm_agent --agent-llm "$AGENT_MODEL" --user "$USER_IMPLEMENTATION" --user-llm "$USER_LLM" --evaluator-llm gpt-4.1 \
     --enable-think --max-steps "$MAX_STEPS" --num-trials 1 --max-concurrency "$CONCURRENCY" \
     --language "$TASK_LANGUAGE" --save-to "$RESULT"
 
 REPO_COMMIT="$(git -C "$REPO" rev-parse HEAD)"
 VITABENCH_COMMIT="$(git -C "$VITA_ROOT" rev-parse HEAD)"
 "$VITA_PYTHON" - "$RESULT" "$SUMMARY" "$SELECTION" "$TERRA_SMOKE" "$REPO_COMMIT" "$VITABENCH_COMMIT" \
-    "$RUN_ID" "$CONCURRENCY" "$AGENT_MODEL" "$AGENT_REASONING_EFFORT" "$TASK_COUNT" "$RECOVERY_OF" <<'PY'
+    "$RUN_ID" "$CONCURRENCY" "$AGENT_MODEL" "$AGENT_REASONING_EFFORT" "$USER_IMPLEMENTATION" "$USER_LLM" "$TASK_COUNT" "$RECOVERY_OF" <<'PY'
 import json
 import sys
 from collections import Counter
 from pathlib import Path
 
 (result_path, summary_path, selection_path, smoke_path, repo_commit, vitabench_commit,
- run_id, concurrency, agent_model, reasoning_effort, expected_task_count, recovery_of) = sys.argv[1:]
+ run_id, concurrency, agent_model, reasoning_effort, user_implementation, user_llm,
+ expected_task_count, recovery_of) = sys.argv[1:]
 result = json.loads(Path(result_path).read_text())
 simulations = result.get("simulations", [])
 if len(simulations) != int(expected_task_count):
     raise SystemExit(f"Expected {expected_task_count} completed tasks, got {len(simulations)}")
 selection = json.loads(Path(selection_path).read_text())
 records = []
+user_turn_count = 0
 for simulation in simulations:
     messages = simulation.get("messages", [])
+    user_messages = [message for message in messages if message.get("role") == "user"]
+    if user_implementation == "vita_rl_deterministic_task_user":
+        for message in user_messages:
+            raw_data = message.get("raw_data") or {}
+            usage = message.get("usage") or {}
+            if raw_data.get("llm_called") is not False or any(
+                usage.get(key, 0) != 0 for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+            ):
+                raise SystemExit("A deterministic-user record contained model usage or lacked its no-LLM marker")
     usages = [message.get("usage") or {} for message in messages]
     records.append({
         "task_id": simulation.get("task_id"),
         "reward": (simulation.get("reward_info") or {}).get("reward"),
         "success": (simulation.get("reward_info") or {}).get("reward") == 1.0,
-        "agent_steps": max(0, len(messages) - 1),
+        "agent_steps": sum(message.get("role") == "assistant" for message in messages),
         "wall_clock_seconds": simulation.get("duration"),
         "prompt_tokens_total": sum(usage.get("prompt_tokens", 0) for usage in usages),
         "output_tokens_total": sum(usage.get("completion_tokens", 0) for usage in usages),
         "tool_error_count": sum(bool(message.get("error")) for message in messages if message.get("role") == "tool"),
         "termination_reason": simulation.get("termination_reason"),
     })
+    user_turn_count += len(user_messages)
 summary = {
     "benchmark": "VitaBench",
     "run_id": run_id,
-    "role_models": {"agent": agent_model, "user_simulator": "gpt-4.1", "evaluator": "gpt-4.1"},
+    "role_models": {"agent": agent_model, "user_simulator": user_llm, "evaluator": "gpt-4.1"},
     "agent_inference": {"thinking": True, "reasoning_effort": reasoning_effort, "max_tokens": 8192, "max_input_tokens": 1050000},
     "harness": "llm_agent",
     "task_set": selection["task_set"],
@@ -255,6 +273,16 @@ summary = {
     },
     "tasks": records,
 }
+if user_implementation == "vita_rl_deterministic_task_user":
+    summary["comparison_label"] = "deterministic-one-shot-autonomous; not comparable to GPT-4.1-user results"
+    summary["user_simulator"] = {
+        "implementation": user_implementation, "llm_calls": False,
+        "policy": "instructions_once_then_agent_environment_autonomous_until_agent_stop",
+        "hidden_state_access": False, "user_turn_count": user_turn_count,
+        "user_prompt_tokens": 0, "user_output_tokens": 0, "user_cost": 0.0,
+    }
+else:
+    summary["user_simulator"] = {"implementation": user_implementation, "llm_calls": True}
 if recovery_of:
     summary["recovery_of"] = recovery_of
 Path(summary_path).write_text(json.dumps(summary, indent=2) + "\n")

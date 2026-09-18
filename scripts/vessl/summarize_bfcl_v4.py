@@ -30,6 +30,33 @@ def json_or_jsonl(path: Path) -> object:
         return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
+def trace_json_stream(path: Path) -> tuple[list[dict], int]:
+    """Read normal JSONL and older adjacent-object traces without losing rows."""
+    text = path.read_text(encoding="utf-8")
+    decoder = json.JSONDecoder()
+    rows: list[dict] = []
+    parse_errors = 0
+    position = 0
+    while position < len(text):
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position >= len(text):
+            break
+        try:
+            row, position = decoder.raw_decode(text, position)
+            if not isinstance(row, dict):
+                parse_errors += 1
+            else:
+                rows.append(row)
+        except json.JSONDecodeError:
+            parse_errors += 1
+            next_record = text.find('{"id"', position + 1)
+            if next_record < 0:
+                break
+            position = next_record
+    return rows, parse_errors
+
+
 def contains_inference_error(value: object) -> bool:
     if isinstance(value, str):
         return "Error during inference:" in value
@@ -97,7 +124,7 @@ def model_summary(args: argparse.Namespace) -> None:
     if total_expected != args.expected_total or total_scored != args.expected_total:
         raise SystemExit(f"Expected {args.expected_total} scored records, got expected={total_expected} scored={total_scored}")
 
-    trace_rows = jsonl(args.trace) if args.trace.is_file() else []
+    trace_rows, trace_parse_errors = trace_json_stream(args.trace) if args.trace.is_file() else ([], 0)
     group_totals: dict[str, dict[str, int | float | None]] = defaultdict(lambda: {"correct_count": 0, "total_count": 0})
     for entry in categories.values():
         aggregate = group_totals[entry["group"]]
@@ -123,8 +150,10 @@ def model_summary(args: argparse.Namespace) -> None:
             "raw_generation_count": len(trace_rows),
             "prompt_tokens": prompt_tokens,
             "output_tokens": output_tokens,
+            "trace_parse_errors": trace_parse_errors,
         },
         "trace_file": str(args.trace),
+        "trace": {"valid": trace_parse_errors == 0, "parse_errors": trace_parse_errors},
         "validation": {"accepted": True, "expected_total": args.expected_total},
     }
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
