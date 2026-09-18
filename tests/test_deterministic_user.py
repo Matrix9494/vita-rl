@@ -17,6 +17,7 @@ from vita_rl.autonomous_user_runner import (
 )
 from vita_rl.deterministic_user import (
     DETERMINISTIC_USER_NAME,
+    PROFILE_CONTEXT_HEADER,
     ZERO_USAGE,
     DeterministicTaskUser,
 )
@@ -94,6 +95,22 @@ def test_one_time_disclosure_is_async_and_has_no_model_usage():
     assert state.instructions_sent is True
     with pytest.raises(RuntimeError, match="non-interactive"):
         asyncio.run(user.generate_next_message(AssistantMessage(role="assistant", content="done"), state))
+
+
+def test_initial_disclosure_includes_only_supplied_public_profile():
+    user = DeterministicTaskUser(
+        instructions="Deliver dinner.",
+        persona="{'home address': '1 Public Lane', 'dietary restrictions': 'No alcohol'}",
+    )
+    state = asyncio.run(user.get_init_state())
+    initial, _ = asyncio.run(user.initial_message(state))
+
+    assert initial.content == (
+        "Deliver dinner.\n\n"
+        f"{PROFILE_CONTEXT_HEADER}\n"
+        "{'home address': '1 Public Lane', 'dietary restrictions': 'No alcohol'}"
+    )
+    assert "evaluation" not in initial.content.lower()
 
 
 def test_authored_user_history_does_not_falsely_mark_controlled_disclosure_sent():

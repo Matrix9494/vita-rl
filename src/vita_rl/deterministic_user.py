@@ -1,9 +1,9 @@
-"""A public-instruction-only, non-LLM user for controlled VitaBench runs.
+"""A public-task-context, non-LLM user for controlled VitaBench runs.
 
 This is deliberately a benchmark treatment, not a replacement for VitaBench's
-LLM user simulator.  It sees the same public ``instructions`` and supplied
-conversation history as an ordinary user implementation, but neither calls a
-model nor receives a task's environment or evaluation criteria.
+LLM user simulator. It sees the public ``instructions``, supplied user profile,
+and conversation history that VitaBench supplies to a user implementation, but
+neither calls a model nor receives task environment state or evaluation criteria.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from vita.user.base import (
 
 DETERMINISTIC_USER_NAME = "vita_rl_deterministic_task_user"
 ZERO_USAGE = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+PROFILE_CONTEXT_HEADER = "User profile (use only to resolve details unspecified in the request):"
 
 
 class DeterministicTaskUserState(UserState):
@@ -56,15 +57,18 @@ class DeterministicTaskUser(BaseUser):
         language: Optional[str] = None,
         **_: Any,
     ) -> None:
-        # VitaBench passes persona/language/model settings to its LLM user.
-        # Accept these solely for constructor compatibility. This treatment
-        # deliberately retains only public instructions and never has a model.
-        del persona, language, llm, llm_args
+        # VitaBench passes a public user profile to every user implementation.
+        # Unlike environment state or evaluator criteria, it is user-owned
+        # context and can resolve an otherwise ambiguous request (for example,
+        # a home versus work delivery destination). This treatment never calls
+        # a model and never receives non-user task state.
+        del language, llm, llm_args
         if not isinstance(instructions, str) or not instructions.strip():
             raise ValueError(
                 "DeterministicTaskUser requires non-empty public task instructions"
             )
         super().__init__(instructions=instructions, llm=None, llm_args=None)
+        self.persona = persona.strip() if isinstance(persona, str) else ""
 
     async def get_init_state(
         self, message_history: Optional[list[Message]] = None
@@ -98,12 +102,15 @@ class DeterministicTaskUser(BaseUser):
     async def initial_message(
         self, state: DeterministicTaskUserState
     ) -> tuple[UserMessage, DeterministicTaskUserState]:
-        """Disclose public instructions once for the autonomous runner."""
+        """Disclose the request and only its public user-owned context once."""
         if state.instructions_sent:
             raise RuntimeError("Controlled task instructions were already disclosed")
+        content = self.instructions
+        if self.persona:
+            content = f"{content}\n\n{PROFILE_CONTEXT_HEADER}\n{self.persona}"
         user_message = UserMessage(
             role="user",
-            content=self.instructions,
+            content=content,
             cost=0.0,
             usage=deepcopy(ZERO_USAGE),
             raw_data={"implementation": DETERMINISTIC_USER_NAME, "llm_called": False},

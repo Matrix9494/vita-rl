@@ -29,9 +29,12 @@ from vita_rl.deterministic_user import DETERMINISTIC_USER_NAME, DeterministicTas
 
 AUTONOMOUS_EXECUTION_DIRECTIVE = (
     "This is a non-interactive execution session. The initial user message contains "
-    "the complete request; no further user responses will arrive. Use the available "
-    "tools to complete that request. When no further tool action is needed, end your "
-    "final response with ###STOP###."
+    "the complete request and, when supplied, the user's public profile. No further "
+    "user responses will arrive. Use available tools to complete the request. Treat "
+    "the profile as user-provided context only when the request leaves a detail "
+    "unspecified; do not invent missing facts. Before stopping, re-check that every "
+    "requirement in the request and applicable profile context has been carried out. "
+    "When no further tool action is needed, end your final response with ###STOP###."
 )
 
 

@@ -9,8 +9,15 @@ KEY_FILE="${OPENROUTER_KEY_FILE:-$REPO/key}"
 COMMIT="${VITA_EVAL_COMMIT:-$(git -C "$REPO" rev-parse HEAD)}"
 TASK_SET="${VITA_TASK_SET:-delivery}"
 TASK_LANGUAGE="${VITA_TASK_LANGUAGE:-english}"
+TASK_COUNT="${VITA_TASK_COUNT:-100}"
+CONCURRENCY="${VITA_MAX_CONCURRENCY:-20}"
 RUN_ID="${VITA_EVAL_RUN_ID:-vessl-vitabench-${TASK_SET}-state-delta-$(date -u +%Y%m%dT%H%M%SZ)}"
-AGENT_TEMPERATURE="${VITA_AGENT_TEMPERATURE:-0.0}"
+AGENT_TEMPERATURE="${VITA_AGENT_TEMPERATURE:-0.7}"
+AGENT_TOP_P="${VITA_AGENT_TOP_P:-0.8}"
+AGENT_TOP_K="${VITA_AGENT_TOP_K:-20}"
+AGENT_MIN_P="${VITA_AGENT_MIN_P:-0.0}"
+AGENT_PRESENCE_PENALTY="${VITA_AGENT_PRESENCE_PENALTY:-1.5}"
+AGENT_REPETITION_PENALTY="${VITA_AGENT_REPETITION_PENALTY:-1.0}"
 REMOTE_WORKTREE="/root/projects/vita-rl-vita-eval-${COMMIT:0:12}"
 REMOTE_ROOT="/root/outputs/vita-rl/vitabench/${RUN_ID}"
 LOCAL_PARENT="$REPO/outputs/vessl_vitabench"
@@ -46,7 +53,7 @@ REMOTE
 
 # stdin carries only the one-line raw key. The remote shell exports it to the
 # detached runner process; the runner unsets it after its localhost proxy starts.
-remote_command=$(printf 'IFS= read -r OPENROUTER_API_KEY; export OPENROUTER_API_KEY; mkdir -p %q; nohup env VITA_EVAL_REPO=%q VITA_EVAL_OUTPUT_ROOT=%q VITA_EVAL_RUN_ID=%q VITA_AGENT_TEMPERATURE=%q VITA_TASK_SET=%q VITA_TASK_LANGUAGE=%q %q > %q 2>&1 & pid=$!; unset OPENROUTER_API_KEY; printf "pid=%%s run_root=%%s\\n" "$pid" %q' \
-    "$REMOTE_ROOT" "$REMOTE_WORKTREE" "$REMOTE_ROOT" "$RUN_ID" "$AGENT_TEMPERATURE" "$TASK_SET" "$TASK_LANGUAGE" "$REMOTE_RUNNER" "$REMOTE_ROOT/driver.log" "$REMOTE_ROOT")
+remote_command=$(printf 'IFS= read -r OPENROUTER_API_KEY; export OPENROUTER_API_KEY; mkdir -p %q; nohup env VITA_EVAL_REPO=%q VITA_EVAL_OUTPUT_ROOT=%q VITA_EVAL_RUN_ID=%q VITA_AGENT_TEMPERATURE=%q VITA_AGENT_TOP_P=%q VITA_AGENT_TOP_K=%q VITA_AGENT_MIN_P=%q VITA_AGENT_PRESENCE_PENALTY=%q VITA_AGENT_REPETITION_PENALTY=%q VITA_TASK_SET=%q VITA_TASK_LANGUAGE=%q VITA_TASK_COUNT=%q VITA_MAX_CONCURRENCY=%q %q > %q 2>&1 & pid=$!; unset OPENROUTER_API_KEY; printf "pid=%%s run_root=%%s\\n" "$pid" %q' \
+    "$REMOTE_ROOT" "$REMOTE_WORKTREE" "$REMOTE_ROOT" "$RUN_ID" "$AGENT_TEMPERATURE" "$AGENT_TOP_P" "$AGENT_TOP_K" "$AGENT_MIN_P" "$AGENT_PRESENCE_PENALTY" "$AGENT_REPETITION_PENALTY" "$TASK_SET" "$TASK_LANGUAGE" "$TASK_COUNT" "$CONCURRENCY" "$REMOTE_RUNNER" "$REMOTE_ROOT/driver.log" "$REMOTE_ROOT")
 tr -d '\r\n' < "$KEY_FILE" | ssh vessl-vita "bash -lc $(printf '%q' "$remote_command")"
 echo "Vessl evaluation started. Poll driver.log remotely, then run: $0 --fetch"
